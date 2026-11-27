@@ -1,0 +1,83 @@
+@import '@fontsource/ibm-plex-sans/400.css';
+@import '@fontsource/ibm-plex-sans/500.css';
+@import '@fontsource/ibm-plex-sans/600.css';
+@import '@fontsource/ibm-plex-mono/400.css';
+@import '@fontsource/ibm-plex-mono/500.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --color-page: #F4F5F7;
+  --color-surface: #FFFFFF;
+  --color-ink: #1B2433;
+  --color-muted: #5B6575;
+  --color-border: #DCE0E7;
+  --color-accent: #1F4FD8;
+  --color-allow: #1E8E5A;
+  --color-review: #B7791F;
+  --color-block: #C0362C;
+}
+
+@layer base {
+  html, body, #root {
+    min-height: 100%;
+    background-color: var(--color-page);
+    color: var(--color-ink);
+    font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Accessible visible keyboard focus rings */
+  :focus-visible {
+    outline: 2px solid var(--color-accent);
+    outline-offset: 1px;
+  }
+}
+
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* 1.5s background fade for new incoming transactions */
+@keyframes rowFadeIn {
+  0% {
+    background-color: #E6EDFE;
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-row-new {
+  animation: rowFadeIn 1.5s ease-out forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-row-new {
+    animation: none;
+  }
+}
+
+/* Clean minimal scrollbars */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--color-border);
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-muted);
+}

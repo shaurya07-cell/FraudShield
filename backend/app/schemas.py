@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import Dict, List, Optional
 from pydantic import BaseModel, Field
 
 
@@ -30,3 +30,4 @@ class ScoredTransaction(BaseModel):
     reasons: List[Reason] = Field(default_factory=list)
     ring_id: Optional[str] = None
     latency_ms: float = 0.0
+    model_scores: Optional[Dict[str, float]] = None

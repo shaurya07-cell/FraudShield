@@ -3,7 +3,7 @@ import math
 import os
 from typing import Any, Dict, List, Optional, Tuple
 
-import joblib
+from . import joblib
 import numpy as np
 
 from app.graph_engine import GLOBAL_GRAPH

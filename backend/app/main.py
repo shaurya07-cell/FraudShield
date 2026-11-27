@@ -7,6 +7,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.graph_engine import GLOBAL_GRAPH
+from app.gateway import GATEWAY, router as gateway_router
 from app.metrics import METRICS
 from app.schemas import ScoredTransaction, Transaction
 from app.scorer import score_transaction
@@ -67,6 +68,7 @@ async def lifespan(app: FastAPI):
     """FastAPI lifespan managing startup background tasks and clean shutdown."""
     global background_task
     # Startup: spawn periodic background graph analyzer
+    GATEWAY.set_broadcast_callback(ws_manager.broadcast)
     background_task = asyncio.create_task(background_ring_detection_loop())
     yield
     # Shutdown: cancel background task
@@ -88,6 +90,8 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+app.include_router(gateway_router)
 
 
 @app.get("/health")
@@ -239,6 +243,7 @@ def reset_all() -> Dict[str, str]:
     reset_state()
     GLOBAL_GRAPH.reset()
     METRICS.reset()
+    GATEWAY.reset()
     return {"status": "ok", "message": "All state, graph, and metrics reset"}
 
 

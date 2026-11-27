@@ -1,56 +1,142 @@
 {
-  "timestamp": "2026-11-27T06:30:09.536862+00:00",
-  "test_samples": 10000,
-  "test_fraud_count": 654,
-  "rules_only": {
-    "precision": 0.9777777777777777,
-    "recall": 0.2018348623853211,
-    "f1_score": 0.33460076045627374,
-    "roc_auc": 0.741453440317891,
-    "pr_auc": 0.3907504500342249,
-    "confusion_matrix": [
-      [
-        9343,
-        3
-      ],
-      [
-        522,
-        132
+  "timestamp": "2026-11-27T09:44:12.465932+00:00",
+  "total_test_samples": 12000,
+  "test_fraud_count": 446,
+  "ablation_results": {
+    "rules_only": {
+      "precision": 0.888268156424581,
+      "recall": 0.35650224215246634,
+      "f1_score": 0.5088,
+      "roc_auc": 0.7345697256244998,
+      "pr_auc": 0.40521634732185685,
+      "false_positive_rate": 0.0017310022503029255,
+      "confusion_matrix": [
+        [
+          11534,
+          20
+        ],
+        [
+          287,
+          159
+        ]
       ]
-    ]
+    },
+    "supervised_xgb": {
+      "precision": 0.8975501113585747,
+      "recall": 0.9035874439461884,
+      "f1_score": 0.9005586592178771,
+      "roc_auc": 0.9974556983740223,
+      "pr_auc": 0.9567678689056842,
+      "false_positive_rate": 0.003981305175696728,
+      "confusion_matrix": [
+        [
+          11508,
+          46
+        ],
+        [
+          43,
+          403
+        ]
+      ]
+    },
+    "anomaly_iforest": {
+      "precision": 0.04966887417218543,
+      "recall": 0.1681614349775785,
+      "f1_score": 0.07668711656441718,
+      "roc_auc": 0.7126341235656163,
+      "pr_auc": 0.06063081047319751,
+      "false_positive_rate": 0.1241994114592349,
+      "confusion_matrix": [
+        [
+          10119,
+          1435
+        ],
+        [
+          371,
+          75
+        ]
+      ]
+    },
+    "behaviour_profile": {
+      "precision": 0.08579773640014604,
+      "recall": 0.5269058295964125,
+      "f1_score": 0.14756671899529042,
+      "roc_auc": 0.7348641124421802,
+      "pr_auc": 0.1268136685837275,
+      "false_positive_rate": 0.21672148173792627,
+      "confusion_matrix": [
+        [
+          9050,
+          2504
+        ],
+        [
+          211,
+          235
+        ]
+      ]
+    },
+    "graph_model": {
+      "precision": 0.28305582761998044,
+      "recall": 0.647982062780269,
+      "f1_score": 0.3940013633265167,
+      "roc_auc": 0.8941460104279302,
+      "pr_auc": 0.36221407836620856,
+      "false_positive_rate": 0.06335468236108707,
+      "confusion_matrix": [
+        [
+          10822,
+          732
+        ],
+        [
+          157,
+          289
+        ]
+      ]
+    },
+    "device_model": {
+      "precision": 0.1808097615085968,
+      "recall": 0.7309417040358744,
+      "f1_score": 0.28990662516674076,
+      "roc_auc": 0.8729739317270978,
+      "pr_auc": 0.3758037609582796,
+      "false_positive_rate": 0.12783451618487104,
+      "confusion_matrix": [
+        [
+          10077,
+          1477
+        ],
+        [
+          120,
+          326
+        ]
+      ]
+    },
+    "full_ensemble": {
+      "precision": 0.9232558139534883,
+      "recall": 0.8901345291479821,
+      "f1_score": 0.906392694063927,
+      "roc_auc": 0.9946208911013288,
+      "pr_auc": 0.9371926922739974,
+      "false_positive_rate": 0.002856153712999827,
+      "confusion_matrix": [
+        [
+          11521,
+          33
+        ],
+        [
+          49,
+          397
+        ]
+      ]
+    }
   },
-  "ml_only": {
-    "precision": 0.9056,
-    "recall": 0.8654434250764526,
-    "f1_score": 0.8850664581704457,
-    "roc_auc": 0.9638738972207442,
-    "pr_auc": 0.8968736170562804,
-    "confusion_matrix": [
-      [
-        9287,
-        59
-      ],
-      [
-        88,
-        566
-      ]
-    ]
-  },
-  "blended": {
-    "precision": 0.9085072231139647,
-    "recall": 0.8654434250764526,
-    "f1_score": 0.8864526233359437,
-    "roc_auc": 0.9511689083818748,
-    "pr_auc": 0.8821102769673541,
-    "confusion_matrix": [
-      [
-        9289,
-        57
-      ],
-      [
-        88,
-        566
-      ]
-    ]
+  "latency_profile": {
+    "supervised_xgb_ms": 0.392,
+    "anomaly_iforest_ms": 4.539,
+    "behaviour_profile_ms": 0.007,
+    "graph_model_ms": 0.367,
+    "device_model_ms": 0.321,
+    "meta_model_ms": 2.703,
+    "total_ensemble_inference_ms": 8.329
   }
 }

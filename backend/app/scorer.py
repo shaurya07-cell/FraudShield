@@ -1,10 +1,12 @@
 """Scorer coordinating rules, graph cache, and ML scoring."""
 import time
-from typing import List, Optional
+import numpy as np
+from typing import Dict, List, Optional
 
 from app.graph_engine import GLOBAL_GRAPH
 from app.metrics import METRICS
-from app.ml import extract_features, get_top_feature, is_model_loaded, predict_proba
+from app.ml import extract_features, get_top_feature, is_model_loaded, predict_proba, FEATURE_NAMES
+from app.models_ensemble import GLOBAL_ENSEMBLE
 from app.rules import evaluate, score_from_reasons
 from app.schemas import Reason, ScoredTransaction, Transaction
 from app.state import GLOBAL_STATE, EngineState
@@ -26,34 +28,70 @@ def score_transaction(
     # 2. ML Scoring with graceful fallback
     ring_id: Optional[str] = None
     graph_cache = GLOBAL_GRAPH.get_cache()
+    model_scores: Optional[Dict[str, float]] = None
+    final_score = rule_score
 
-    if is_model_loaded():
+    if is_model_loaded() and GLOBAL_ENSEMBLE.is_loaded:
+        try:
+            features = extract_features(transaction, state=state, graph_cache=graph_cache)
+            ensemble_score, model_scores, ensemble_reasons = GLOBAL_ENSEMBLE.score_transaction(
+                features, rule_score, transaction
+            )
+            blended = int(round(0.4 * rule_score + 0.6 * ensemble_score))
+            final_score = min(max(blended, 0), 100)
+            top_feature = get_top_feature(features)
+            meta_score = model_scores.get("meta", ensemble_score / 100.0) if model_scores else (ensemble_score / 100.0)
+            reasons.append(
+                Reason(
+                    rule="ML_MODEL",
+                    detail=f"Ensemble meta-score: {meta_score:.1%}, top driver: {top_feature}",
+                    weight=int(round(0.6 * ensemble_score)),
+                )
+            )
+            # SHAP-like contributions for supervised model
+            if GLOBAL_ENSEMBLE.supervised_model is not None:
+                try:
+                    vec = np.array([[features.get(f, 0.0) for f in FEATURE_NAMES]], dtype=np.float32)
+                    if hasattr(GLOBAL_ENSEMBLE.supervised_model, "get_booster"):
+                        contribs = GLOBAL_ENSEMBLE.supervised_model.get_booster().predict(vec, pred_contribs=True)
+                        contrib_vals = contribs[0][:-1]
+                    else:
+                        contrib_vals = np.array([GLOBAL_ENSEMBLE.supervised_model.feature_importances_] * len(FEATURE_NAMES))[0]
+                    top_idxs = np.argsort(-np.abs(contrib_vals))[:2]
+                    for idx in top_idxs:
+                        fname = FEATURE_NAMES[idx]
+                        fvalue = features.get(fname, 0.0)
+                        reasons.append(
+                            Reason(
+                                rule="FEATURE_XGBOOST",
+                                detail=f"Feature '{fname}' (value {fvalue:.2f}) contributes to risk",
+                                weight=1,
+                            )
+                        )
+                except Exception:
+                    pass
+            reasons.extend(ensemble_reasons)
+        except Exception:
+            final_score = rule_score
+    elif is_model_loaded():
         try:
             features = extract_features(transaction, state=state, graph_cache=graph_cache)
             ml_prob = predict_proba(features)
             ml_score = int(round(ml_prob * 100))
-
-            # Blended Score: 40% rules + 60% ML
             final_score = int(round(0.4 * rule_score + 0.6 * ml_score))
             final_score = min(max(final_score, 0), 100)
-
-            # Detail with top contributing feature
             top_feature = get_top_feature(features)
-            ml_weight = int(round(0.6 * ml_score))
             reasons.append(
                 Reason(
                     rule="ML_MODEL",
                     detail=f"Predicted risk: {ml_prob:.1%}, top driver: {top_feature}",
-                    weight=ml_weight,
+                    weight=int(round(0.6 * ml_score)),
                 )
             )
         except Exception:
-            # Fallback gracefully to rules only
             final_score = rule_score
-    else:
-        final_score = rule_score
 
-    # Check for detected fraud ring from graph cache
+    # 3. Detect fraud ring from graph cache
     node_to_ring = graph_cache.get("node_to_ring", {})
     if transaction.sender_id in node_to_ring:
         ring_id = node_to_ring[transaction.sender_id]
@@ -65,7 +103,7 @@ def score_transaction(
     # Ingest into graph engine
     GLOBAL_GRAPH.add_transaction(transaction, risk=final_score / 100.0)
 
-    # 3. Decision Thresholds (ALLOW: 0-39, REVIEW: 40-69, BLOCK: 70-100)
+    # 4. Decision thresholds
     if final_score >= 70:
         decision = "BLOCK"
     elif final_score >= 40:
@@ -86,9 +124,7 @@ def score_transaction(
         reasons=reasons,
         ring_id=ring_id,
         latency_ms=round(latency_ms, 3),
+        model_scores=model_scores,
     )
-
-    # Update metrics in-memory collector (O(1), no I/O)
     METRICS.update(scored)
-
     return scored
