@@ -10,6 +10,14 @@ except ImportError:
             self.edge_attrs = {}
             self.adj = {}
 
+        def clear(self):
+            self.nodes_set.clear()
+            self.edge_attrs.clear()
+            self.adj.clear()
+
+        def __len__(self):
+            return len(self.nodes_set)
+
         def add_node(self, n):
             self.nodes_set.add(n)
             self.adj.setdefault(n, {})

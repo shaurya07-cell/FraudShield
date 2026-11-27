@@ -13,21 +13,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onSelectTab, connect
     <header className="w-full bg-[#FFFFFF] border-b border-[#DCE0E7] sticky top-0 z-30">
       <div className="max-w-[1440px] mx-auto px-3 sm:px-4 h-12 flex items-center justify-between">
         <div className="flex items-center space-x-3 sm:space-x-6">
-          {/* Logo mark + Brand text */}
-          <div className="flex items-center space-x-1.5 sm:space-x-2">
-            <svg
-              className="w-5 h-5 text-[#1F4FD8] flex-shrink-0"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              aria-hidden="true"
-            >
-              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
-            </svg>
-            <span className="font-semibold text-[14px] sm:text-[15px] tracking-tight text-[#1B2433]">FraudShield</span>
+          {/* Logo */}
+          <div className="flex items-center">
+            <img src="/logo.png" alt="FraudShield" className="h-7 w-auto object-contain flex-shrink-0" />
           </div>
 
           {/* Navigation Links */}

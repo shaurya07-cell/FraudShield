@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.graph_engine import GLOBAL_GRAPH
 from app.gateway import GATEWAY, router as gateway_router
+from app.razorpay_gateway import RAZORPAY_LEDGER, router as razorpay_router
 from app.metrics import METRICS
 from app.schemas import ScoredTransaction, Transaction
 from app.scorer import score_transaction
@@ -69,6 +70,7 @@ async def lifespan(app: FastAPI):
     global background_task
     # Startup: spawn periodic background graph analyzer
     GATEWAY.set_broadcast_callback(ws_manager.broadcast)
+    RAZORPAY_LEDGER.set_broadcast_callback(ws_manager.broadcast)
     background_task = asyncio.create_task(background_ring_detection_loop())
     yield
     # Shutdown: cancel background task
@@ -92,6 +94,7 @@ app.add_middleware(
 )
 
 app.include_router(gateway_router)
+app.include_router(razorpay_router)
 
 
 @app.get("/health")
@@ -244,6 +247,7 @@ def reset_all() -> Dict[str, str]:
     GLOBAL_GRAPH.reset()
     METRICS.reset()
     GATEWAY.reset()
+    RAZORPAY_LEDGER.reset()
     return {"status": "ok", "message": "All state, graph, and metrics reset"}
 
 

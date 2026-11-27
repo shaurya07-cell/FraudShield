@@ -5,6 +5,12 @@ import type {
   GatewayPayResponse,
   GraphPayload,
   OperationalMetrics,
+  RazorpayConfig,
+  RazorpayCreateOrderRequest,
+  RazorpayCreateOrderResponse,
+  RazorpayPaymentRecord,
+  RazorpayVerifyRequest,
+  RazorpayVerifyResponse,
   ScoredTransaction,
 } from '../types/fraud';
 
@@ -233,3 +239,48 @@ export function subscribeToLiveStream(
     if (ws) ws.close();
   };
 }
+
+// --- Razorpay Test Mode APIs ---
+
+export async function fetchRazorpayConfig(): Promise<RazorpayConfig> {
+  const res = await fetch(`${API_BASE}/razorpay/config`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Razorpay config: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function createRazorpayOrder(req: RazorpayCreateOrderRequest): Promise<RazorpayCreateOrderResponse> {
+  const res = await fetch(`${API_BASE}/razorpay/create-order`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Failed to create Razorpay order (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function verifyRazorpayPayment(req: RazorpayVerifyRequest): Promise<RazorpayVerifyResponse> {
+  const res = await fetch(`${API_BASE}/razorpay/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const errorData = await res.json().catch(() => ({}));
+    throw new Error(errorData.detail || `Payment verification failed (${res.status})`);
+  }
+  return res.json();
+}
+
+export async function fetchRazorpayPayments(limit = 50): Promise<RazorpayPaymentRecord[]> {
+  const res = await fetch(`${API_BASE}/razorpay/payments?limit=${limit}`);
+  if (!res.ok) {
+    throw new Error(`Failed to fetch Razorpay payments: ${res.statusText}`);
+  }
+  return res.json();
+}
+

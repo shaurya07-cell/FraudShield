@@ -4,4 +4,11 @@ __pycache__/
 **/__pycache__/
 node_modules/
 .env
+.env.*
+*.env
+backend/.env
+!.env.example
+!backend/.env.example
 *.pyc
+
+frontend/dist/

@@ -13,7 +13,7 @@ import os
 from typing import Any, Dict, List, Optional, Tuple
 import warnings
 
-from . import joblib
+import joblib
 import numpy as np
 
 from app.schemas import Reason, Transaction

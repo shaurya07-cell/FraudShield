@@ -9,3 +9,5 @@ faker
 pydantic
 websockets
 pytest
+razorpay
+python-dotenv

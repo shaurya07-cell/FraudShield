@@ -112,3 +112,52 @@ export interface GatewayConfirmResponse {
   sender_balance_after: number | null;
   receiver_balance_after: number | null;
 }
+
+export interface RazorpayConfig {
+  enabled: boolean;
+  mode: 'test' | 'live';
+}
+
+export interface RazorpayCreateOrderRequest {
+  customer_id: string;
+  payee_id?: string;
+  amount_inr: number;
+  device_id?: string;
+}
+
+export interface RazorpayCreateOrderResponse {
+  status: 'ORDER_CREATED' | 'BLOCKED';
+  order_id?: string | null;
+  key_id?: string | null;
+  amount?: number | null;
+  decision: Decision;
+  risk_score: number;
+  reasons: Reason[];
+  requires_extra_verification: boolean;
+  model_scores?: Record<string, number> | null;
+  message?: string | null;
+}
+
+export interface RazorpayVerifyRequest {
+  razorpay_order_id: string;
+  razorpay_payment_id: string;
+  razorpay_signature: string;
+}
+
+export interface RazorpayVerifyResponse {
+  status: 'VERIFIED' | 'TAMPERED';
+  order_id: string;
+  payment_id: string;
+  message: string;
+}
+
+export interface RazorpayPaymentRecord {
+  order_id: string;
+  payment_id?: string | null;
+  status: 'ORDER_CREATED' | 'BLOCKED' | 'VERIFIED' | 'TAMPERED' | 'AUTHORIZED' | 'CAPTURED' | 'FAILED';
+  decision?: Decision | null;
+  risk_score: number;
+  reasons: Reason[];
+  amount: number;
+  created_at: string;
+}
