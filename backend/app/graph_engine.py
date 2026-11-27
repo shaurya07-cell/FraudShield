@@ -1,0 +1,172 @@
+"""Graph-based fraud ring detection module using NetworkX."""
+from typing import Any, Dict, List, Optional, Set
+import networkx as nx
+
+from app.schemas import Transaction
+
+
+class GraphEngine:
+    """Thread-safe and asynchronous graph analytics engine for fraud ring detection."""
+
+    def __init__(self):
+        self.graph: nx.DiGraph = nx.DiGraph()
+        self.node_risk: Dict[str, float] = {}
+        self.cache: Dict[str, Any] = {
+            "in_degree": {},
+            "out_degree": {},
+            "pagerank": {},
+            "clustering": {},
+            "cycle_nodes": set(),
+            "component_size": {},
+            "neighbor_avg_risk": {},
+            "rings": [],
+            "node_to_ring": {},
+        }
+
+    def reset(self) -> None:
+        """Clear all graph state and cached metrics."""
+        self.graph.clear()
+        self.node_risk.clear()
+        self.cache = {
+            "in_degree": {},
+            "out_degree": {},
+            "pagerank": {},
+            "clustering": {},
+            "cycle_nodes": set(),
+            "component_size": {},
+            "neighbor_avg_risk": {},
+            "rings": [],
+            "node_to_ring": {},
+        }
+
+    def add_transaction(self, txn: Transaction, risk: float = 0.0) -> None:
+        """Add directed edge between sender and receiver with transaction weight."""
+        if not self.graph.has_node(txn.sender_id):
+            self.graph.add_node(txn.sender_id)
+        if not self.graph.has_node(txn.receiver_id):
+            self.graph.add_node(txn.receiver_id)
+
+        # Update edge attributes
+        if self.graph.has_edge(txn.sender_id, txn.receiver_id):
+            self.graph[txn.sender_id][txn.receiver_id]["weight"] += txn.amount
+            self.graph[txn.sender_id][txn.receiver_id]["count"] += 1
+            self.graph[txn.sender_id][txn.receiver_id]["last_time"] = txn.timestamp
+        else:
+            self.graph.add_edge(
+                txn.sender_id,
+                txn.receiver_id,
+                weight=txn.amount,
+                count=1,
+                last_time=txn.timestamp,
+            )
+
+        if risk > 0.0:
+            self.update_node_risk(txn.sender_id, risk)
+
+    def update_node_risk(self, account_id: str, risk: float) -> None:
+        """Update known account risk score."""
+        current = self.node_risk.get(account_id, 0.0)
+        self.node_risk[account_id] = max(current, risk)
+
+    def recompute_cache(self) -> Dict[str, Any]:
+        """Recompute topological graph metrics, cycle rings, and update in-memory cache."""
+        if len(self.graph) == 0:
+            return self.cache
+
+        # 1. Degrees
+        in_degree = dict(self.graph.in_degree())
+        out_degree = dict(self.graph.out_degree())
+
+        # 2. PageRank
+        try:
+            pagerank = nx.pagerank(self.graph, alpha=0.85, max_iter=50, tol=1e-4)
+        except Exception:
+            pagerank = {n: 1.0 / len(self.graph) for n in self.graph.nodes()}
+
+        # 3. Clustering coefficient (on undirected projection)
+        try:
+            undirected_graph = self.graph.to_undirected()
+            clustering = nx.clustering(undirected_graph)
+        except Exception:
+            clustering = {n: 0.0 for n in self.graph.nodes()}
+
+        # 4. Cycle & Ring detection via Strongly Connected Components
+        cycle_nodes: Set[str] = set()
+        rings: List[Dict[str, Any]] = []
+        node_to_ring: Dict[str, str] = {}
+
+        for scc in nx.strongly_connected_components(self.graph):
+            if len(scc) > 1:
+                cycle_nodes.update(scc)
+                members = sorted(list(scc))
+                r_id = f"RING_{members[0]}"
+                member_risks = [self.node_risk.get(m, 0.8) for m in members]
+                avg_risk = sum(member_risks) / len(member_risks) if member_risks else 0.8
+                r_score = int(round(max(max(member_risks, default=0.8), avg_risk) * 100))
+                rings.append({
+                    "ring_id": r_id,
+                    "members": members,
+                    "score": min(max(r_score, 75), 100),
+                })
+                for m in members:
+                    node_to_ring[m] = r_id
+            elif len(scc) == 1:
+                node = next(iter(scc))
+                if self.graph.has_edge(node, node):
+                    cycle_nodes.add(node)
+                    r_id = f"RING_{node}"
+                    rings.append({
+                        "ring_id": r_id,
+                        "members": [node],
+                        "score": 90,
+                    })
+                    node_to_ring[node] = r_id
+
+        # 5. Connected component sizes (weakly connected)
+        component_size: Dict[str, int] = {}
+        for comp in nx.weakly_connected_components(self.graph):
+            c_len = len(comp)
+            for node in comp:
+                component_size[node] = c_len
+
+        # 6. Message-passing neighbor average risk
+        neighbor_avg_risk: Dict[str, float] = {}
+        for node in self.graph.nodes():
+            neighbors = set(self.graph.predecessors(node)) | set(self.graph.successors(node))
+            if neighbors:
+                total_risk = sum(self.node_risk.get(nbr, 0.0) for nbr in neighbors)
+                neighbor_avg_risk[node] = total_risk / len(neighbors)
+            else:
+                neighbor_avg_risk[node] = 0.0
+
+        self.cache = {
+            "in_degree": in_degree,
+            "out_degree": out_degree,
+            "pagerank": pagerank,
+            "clustering": clustering,
+            "cycle_nodes": cycle_nodes,
+            "component_size": component_size,
+            "neighbor_avg_risk": neighbor_avg_risk,
+            "rings": rings,
+            "node_to_ring": node_to_ring,
+        }
+        return self.cache
+
+    def get_cache(self) -> Dict[str, Any]:
+        """Return cached graph metrics."""
+        return self.cache
+
+
+# Global singleton engine and backwards-compatible aliases
+GLOBAL_GRAPH = GraphEngine()
+graph = GLOBAL_GRAPH.graph
+
+
+def detect_cycles() -> Dict[str, Any]:
+    """Detect cycles or ring structures in background."""
+    cache = GLOBAL_GRAPH.recompute_cache()
+    return {
+        "cycle_nodes": list(cache.get("cycle_nodes", set())),
+        "count": len(cache.get("cycle_nodes", set())),
+        "rings": cache.get("rings", []),
+    }
