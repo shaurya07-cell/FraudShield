@@ -100,8 +100,8 @@ def score_transaction(
     elif transaction.sender_id in graph_cache.get("cycle_nodes", set()):
         ring_id = f"RING_{transaction.sender_id[:8]}"
 
-    # Ingest into graph engine
-    GLOBAL_GRAPH.add_transaction(transaction, risk=final_score / 100.0)
+    # Ingest into graph engine using rule_score for exact parity with training pipeline
+    GLOBAL_GRAPH.add_transaction(transaction, risk=rule_score / 100.0)
 
     # 4. Decision thresholds
     if final_score >= 70:

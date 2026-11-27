@@ -96,6 +96,22 @@ app.add_middleware(
 app.include_router(gateway_router)
 app.include_router(razorpay_router)
 
+# Aliases on root prefix for convenience (/payments/{ref} and /payments/{ref}/receipt)
+@app.get("/payments/{ref}")
+def get_payment_root(ref: str):
+    from app.gateway import get_payment_by_ref
+    return get_payment_by_ref(ref)
+
+@app.get("/payments/{ref}/receipt")
+def get_payment_receipt_root(ref: str):
+    from app.gateway import get_payment_receipt
+    return get_payment_receipt(ref)
+
+@app.get("/payments")
+def list_payments_root(limit: int = 50):
+    from app.gateway import list_payments
+    return list_payments(limit=limit)
+
 
 @app.get("/health")
 def health() -> dict:

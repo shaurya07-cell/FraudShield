@@ -11,6 +11,7 @@ from pydantic import BaseModel, Field
 
 from app.schemas import Reason, Transaction
 from app.scorer import score_transaction
+from app.payment_flow import PAYMENT_FLOW, PaymentState
 
 
 # --- Pydantic Request & Response Models ---
@@ -30,6 +31,7 @@ class GatewayConfirmRequest(BaseModel):
 
 class GatewayPaymentResponse(BaseModel):
     payment_id: str
+    reference_id: Optional[str] = None
     status: str  # SUCCESS | PENDING_VERIFICATION | DECLINED | FAILED
     decision: Optional[str] = None  # ALLOW | REVIEW | BLOCK | None
     risk_score: int = 0
@@ -46,6 +48,7 @@ class GatewayPaymentResponse(BaseModel):
 
 class GatewayConfirmResponse(BaseModel):
     payment_id: str
+    reference_id: Optional[str] = None
     status: str
     message: str
     sender_balance_after: Optional[float] = None
@@ -61,6 +64,7 @@ class GatewayAccount(BaseModel):
 
 class GatewayPaymentRecord(BaseModel):
     payment_id: str
+    reference_id: Optional[str] = None
     created_at: str
     from_account: str
     to_account: str
@@ -179,8 +183,18 @@ class GatewayManager:
 
             if validation_error:
                 total_ms = round((time.perf_counter() - start_time) * 1000, 2)
+                flow_rec = PAYMENT_FLOW.create_payment(
+                    from_account=req.from_account,
+                    to_account=req.to_account,
+                    amount=amt,
+                    payment_id=payment_id,
+                )
+                flow_rec.transition_to(PaymentState.FAILED, message=validation_error)
+                flow_rec.total_ms = total_ms
+
                 record = GatewayPaymentRecord(
                     payment_id=payment_id,
+                    reference_id=flow_rec.reference_id,
                     created_at=now_iso,
                     from_account=req.from_account,
                     to_account=req.to_account,
@@ -196,6 +210,7 @@ class GatewayManager:
                 self._ledger.append(record)
                 return GatewayPaymentResponse(
                     payment_id=payment_id,
+                    reference_id=flow_rec.reference_id,
                     status="FAILED",
                     decision=None,
                     risk_score=0,
@@ -216,6 +231,14 @@ class GatewayManager:
             acc_num = 1
         derived_ip = f"10.0.{acc_num // 256}.{acc_num % 256}"
         device_id = req.device_id or f"DEV_{req.from_account}"
+
+        flow_rec = PAYMENT_FLOW.create_payment(
+            from_account=req.from_account,
+            to_account=req.to_account,
+            amount=amt,
+            payment_id=payment_id,
+        )
+        flow_rec.transition_to(PaymentState.FRAUD_CHECK)
 
         txn = Transaction(
             txn_id=f"TXN_GW_{uuid.uuid4().hex[:10]}",
@@ -246,28 +269,40 @@ class GatewayManager:
             demo_otp: Optional[str] = None
             message = ""
 
+            flow_rec.decision = scored.decision
+            flow_rec.risk_score = scored.risk_score
+            flow_rec.reasons = scored.reasons
+            flow_rec.ring_id = scored.ring_id
+            flow_rec.fraud_check_ms = fraud_check_ms
+
             if scored.decision == "ALLOW":
-                # Debit sender, credit receiver
-                sender.balance = round(sender.balance - amt, 2)
-                receiver.balance = round(receiver.balance + amt, 2)
-                sender_balance_after = sender.balance
-                receiver_balance_after = receiver.balance
-                status = "SUCCESS"
-                message = "Payment approved and processed successfully."
+                flow_rec.transition_to(PaymentState.DEBIT_PENDING)
+                # Check sufficient funds before debit
+                if sender.balance >= amt:
+                    sender.balance = round(sender.balance - amt, 2)
+                    receiver.balance = round(receiver.balance + amt, 2)
+                    sender_balance_after = sender.balance
+                    receiver_balance_after = receiver.balance
+                    status = "SUCCESS"
+                    message = "Payment approved and processed successfully."
+                    flow_rec.transition_to(PaymentState.SUCCESS, message=message)
+                else:
+                    status = "FAILED"
+                    message = f"Insufficient funds during settlement. Available: INR {sender.balance:,.2f}."
+                    flow_rec.transition_to(PaymentState.FAILED, message=message)
 
             elif scored.decision == "REVIEW":
-                # Do not move money; require OTP confirmation
                 status = "PENDING_VERIFICATION"
-                # Generate a 6-digit demo verification code
                 rng = random.Random()
                 demo_otp = f"{rng.randint(100000, 999999)}"
                 sender_balance_after = sender.balance
                 receiver_balance_after = None
                 top_rule = scored.reasons[0].detail if scored.reasons else "Abnormal activity detected"
                 message = f"Payment flagged for verification: {top_rule}."
+                flow_rec.demo_otp = demo_otp
+                flow_rec.transition_to(PaymentState.OTP_PENDING, message=message)
 
             elif scored.decision == "BLOCK":
-                # Reject payment outright; no money moved
                 status = "DECLINED"
                 sender_balance_after = sender.balance
                 receiver_balance_after = None
@@ -277,11 +312,16 @@ class GatewayManager:
                     message = f"Payment blocked: {scored.reasons[0].detail}."
                 else:
                     message = "Payment blocked: high risk score detected."
+                flow_rec.transition_to(PaymentState.DECLINED, message=message)
 
             total_ms = round((time.perf_counter() - start_time) * 1000, 2)
+            flow_rec.total_ms = total_ms
+            flow_rec.sender_balance_after = sender_balance_after
+            flow_rec.receiver_balance_after = receiver_balance_after
 
             record = GatewayPaymentRecord(
                 payment_id=payment_id,
+                reference_id=flow_rec.reference_id,
                 created_at=now_iso,
                 from_account=req.from_account,
                 to_account=req.to_account,
@@ -299,6 +339,7 @@ class GatewayManager:
 
             return GatewayPaymentResponse(
                 payment_id=payment_id,
+                reference_id=flow_rec.reference_id,
                 status=status,
                 decision=scored.decision,
                 risk_score=scored.risk_score,
@@ -319,6 +360,8 @@ class GatewayManager:
             if not payment:
                 raise HTTPException(status_code=404, detail="Payment record not found.")
 
+            flow_rec = PAYMENT_FLOW.get_payment(payment.payment_id)
+
             if payment.status != "PENDING_VERIFICATION":
                 raise HTTPException(
                     status_code=400,
@@ -333,14 +376,20 @@ class GatewayManager:
 
                 if not sender or not receiver:
                     payment.status = "FAILED"
+                    if flow_rec:
+                        flow_rec.transition_to(PaymentState.FAILED, message="Associated accounts no longer active.")
                     raise HTTPException(status_code=400, detail="Associated accounts no longer active.")
 
                 if sender.balance < payment.amount:
                     payment.status = "FAILED"
+                    msg = f"Insufficient balance in sender account '{sender.id}'."
+                    if flow_rec:
+                        flow_rec.transition_to(PaymentState.FAILED, message=msg)
                     return GatewayConfirmResponse(
                         payment_id=payment.payment_id,
+                        reference_id=flow_rec.reference_id if flow_rec else None,
                         status="FAILED",
-                        message=f"Insufficient balance in sender account '{sender.id}'.",
+                        message=msg,
                         sender_balance_after=sender.balance,
                         receiver_balance_after=receiver.balance,
                     )
@@ -349,22 +398,34 @@ class GatewayManager:
                 sender.balance = round(sender.balance - payment.amount, 2)
                 receiver.balance = round(receiver.balance + payment.amount, 2)
                 payment.status = "SUCCESS"
+                succ_msg = "Verification code confirmed. Payment processed successfully."
+                if flow_rec:
+                    flow_rec.transition_to(PaymentState.SUCCESS, message=succ_msg)
+                    flow_rec.sender_balance_after = sender.balance
+                    flow_rec.receiver_balance_after = receiver.balance
 
                 return GatewayConfirmResponse(
                     payment_id=payment.payment_id,
+                    reference_id=flow_rec.reference_id if flow_rec else None,
                     status="SUCCESS",
-                    message="Verification code confirmed. Payment processed successfully.",
+                    message=succ_msg,
                     sender_balance_after=sender.balance,
                     receiver_balance_after=receiver.balance,
                 )
             else:
                 payment.failed_otp_attempts += 1
+                if flow_rec:
+                    flow_rec.failed_otp_attempts = payment.failed_otp_attempts
                 if payment.failed_otp_attempts >= 3:
                     payment.status = "DECLINED"
+                    decl_msg = "Maximum verification attempts exceeded. Payment declined."
+                    if flow_rec:
+                        flow_rec.transition_to(PaymentState.DECLINED, message=decl_msg)
                     return GatewayConfirmResponse(
                         payment_id=payment.payment_id,
+                        reference_id=flow_rec.reference_id if flow_rec else None,
                         status="DECLINED",
-                        message="Maximum verification attempts exceeded. Payment declined.",
+                        message=decl_msg,
                         sender_balance_after=self._accounts.get(payment.from_account, GatewayAccount(id="", name="", balance=0)).balance,
                     )
                 remaining = 3 - payment.failed_otp_attempts
@@ -411,6 +472,53 @@ def list_accounts(limit: int = Query(default=20, ge=1, le=500)) -> List[GatewayA
 def list_payments(limit: int = Query(default=50, ge=1, le=100)) -> List[GatewayPaymentRecord]:
     """Retrieve recent gateway payments from the in-memory ledger."""
     return GATEWAY.get_payments(limit=limit)
+
+
+@router.get("/payments/{ref}")
+def get_payment_by_ref(ref: str) -> Dict[str, Any]:
+    """Retrieve stateful payment status by backend reference ID or payment ID."""
+    flow = PAYMENT_FLOW.get_payment(ref)
+    if not flow:
+        # Check standard ledger as fallback
+        with GATEWAY._lock:
+            rec = next((p for p in GATEWAY._ledger if p.payment_id == ref or p.reference_id == ref), None)
+            if rec:
+                return rec.model_dump()
+        raise HTTPException(status_code=404, detail=f"Payment reference '{ref}' not found.")
+
+    return {
+        "reference_id": flow.reference_id,
+        "payment_id": flow.payment_id,
+        "state": flow.state.value,
+        "from_account": flow.from_account,
+        "to_account": flow.to_account,
+        "amount": flow.amount,
+        "decision": flow.decision,
+        "risk_score": flow.risk_score,
+        "reasons": [r.model_dump() for r in flow.reasons],
+        "ring_id": flow.ring_id,
+        "created_at": flow.created_at,
+        "updated_at": flow.updated_at,
+        "message": flow.message,
+        "fraud_check_ms": flow.fraud_check_ms,
+        "total_ms": flow.total_ms,
+        "demo_otp": flow.demo_otp,
+    }
+
+
+@router.get("/payments/{ref}/receipt")
+def get_payment_receipt(ref: str) -> Dict[str, Any]:
+    """Retrieve structured JSON receipt for a completed or resolved payment."""
+    flow = PAYMENT_FLOW.get_payment(ref)
+    if not flow:
+        raise HTTPException(status_code=404, detail=f"Payment reference '{ref}' not found.")
+
+    payer = GATEWAY.get_account(flow.from_account)
+    payee = GATEWAY.get_account(flow.to_account)
+    payer_name = payer.name if payer else "Simulated Payer"
+    payee_name = payee.name if payee else "Simulated Payee"
+
+    return PAYMENT_FLOW.build_receipt(flow, payer_name=payer_name, payee_name=payee_name)
 
 
 @router.post("/reset")

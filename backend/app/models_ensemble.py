@@ -16,9 +16,10 @@ import warnings
 import joblib
 import numpy as np
 
+from app.ml import get_models_dir
 from app.schemas import Reason, Transaction
 
-MODELS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
+MODELS_DIR = get_models_dir()
 
 FEATURE_NAMES: List[str] = [
     "amount",

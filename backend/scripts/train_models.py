@@ -8,6 +8,7 @@ Generates ~60,000 realistic transactions with noise and hard edge-cases:
 - Split: 70% Train, 10% Validation (for Meta-Model), 20% Test (for Ablation)
 - Saves specialist models, calibrated meta-model, and evaluation artifacts in docs/
 """
+import argparse
 import datetime
 import json
 import math
@@ -61,10 +62,8 @@ from app.simulator import (
 )
 from app.state import EngineState
 
-MODELS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
+DEFAULT_MODELS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models_v2"))
 DOCS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "docs"))
-os.makedirs(MODELS_DIR, exist_ok=True)
-os.makedirs(DOCS_DIR, exist_ok=True)
 
 
 def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transaction], Set[str]]:
@@ -298,8 +297,33 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Train FraudShield models without label leakage.")
+    parser.add_argument(
+        "--out-dir",
+        type=str,
+        default=DEFAULT_MODELS_DIR,
+        help="Directory to save trained model artifacts (default: backend/models_v2, never backend/models)",
+    )
+    parser.add_argument(
+        "--report-file",
+        type=str,
+        default="ml_report_v2.json",
+        help="Filename for the evaluation report in docs/ (default: ml_report_v2.json)",
+    )
+    args = parser.parse_args()
+
+    models_dir = os.path.abspath(args.out_dir)
+    forbidden_models_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models"))
+    if os.path.commonpath([models_dir, forbidden_models_dir]) == forbidden_models_dir and models_dir == forbidden_models_dir:
+        raise ValueError(f"Refusing to write to protected production models directory: {models_dir}")
+
+    os.makedirs(models_dir, exist_ok=True)
+    os.makedirs(DOCS_DIR, exist_ok=True)
+
     print("=" * 70)
     print("FraudShield Multi-Model Specialist Ensemble Training & Calibration")
+    print(f"Artifacts output directory: {models_dir}")
+    print(f"Report file: docs/{args.report_file}")
     print("=" * 70)
 
     # 1. Dataset Generation
@@ -342,9 +366,12 @@ def main():
         is_fraud = 1 if txn.txn_id in fraud_ids else 0
         labels.append(is_fraud)
 
-        # Update in-memory structures
+        # Update in-memory structures (Zero Label Leakage)
+        # Live and Training Parity Rule: Node risk is updated strictly using the heuristic
+        # rule score available at evaluation time (r_score / 100.0). Ground truth is_fraud is NEVER
+        # fed into the graph, matching live scoring and eliminating label contamination.
         state.update(txn)
-        graph_engine.add_transaction(txn, risk=float(is_fraud))
+        graph_engine.add_transaction(txn, risk=r_score / 100.0)
         profile_model.update_account(txn.sender_id, float(txn.amount), txn.receiver_id)
 
     extract_duration = time.perf_counter() - t0_extract
@@ -353,10 +380,19 @@ def main():
     # Final cache computation
     graph_engine.recompute_cache()
 
-    # 3. Splits: 70% Train, 10% Validation, 20% Test
+    # 3. Splits: 70% Train, 10% Validation, 20% Test (chronologically ordered)
     total_samples = len(txns)
     train_end = int(total_samples * 0.70)
     val_end = int(total_samples * 0.80)
+
+    train_fraud = sum(labels[:train_end])
+    val_fraud = sum(labels[train_end:val_end])
+    test_fraud = sum(labels[val_end:])
+
+    print("\nDataset Split Summary (strictly chronological):")
+    print(f"  Train: {train_end:,} txns, fraud={train_fraud:,} ({train_fraud/train_end:.2%}), [{txns[0].timestamp} to {txns[train_end-1].timestamp}]")
+    print(f"  Val:   {val_end - train_end:,} txns, fraud={val_fraud:,} ({val_fraud/(val_end - train_end):.2%}), [{txns[train_end].timestamp} to {txns[val_end-1].timestamp}]")
+    print(f"  Test:  {total_samples - val_end:,} txns, fraud={test_fraud:,} ({test_fraud/(total_samples - val_end):.2%}), [{txns[val_end].timestamp} to {txns[-1].timestamp}]")
 
     X_all = pd.DataFrame(feature_records)
     y_all = np.array(labels, dtype=int)
@@ -482,14 +518,14 @@ def main():
     # -------------------------------------------------------------
     # Save Model Artifacts
     # -------------------------------------------------------------
-    print("\nSaving model artifacts to backend/models/...")
-    joblib.dump(supervised_model, os.path.join(MODELS_DIR, "supervised_xgb.joblib"))
-    joblib.dump(supervised_model, os.path.join(MODELS_DIR, "fraud_model.joblib"))
-    joblib.dump(anomaly_model, os.path.join(MODELS_DIR, "anomaly_iforest.joblib"))
-    joblib.dump(profile_model, os.path.join(MODELS_DIR, "behaviour_profile.joblib"))
-    joblib.dump(graph_model, os.path.join(MODELS_DIR, "graph_model.joblib"))
-    joblib.dump(device_model, os.path.join(MODELS_DIR, "device_identity_model.joblib"))
-    joblib.dump(meta_model, os.path.join(MODELS_DIR, "meta_model.joblib"))
+    print(f"\nSaving model artifacts to {models_dir}...")
+    joblib.dump(supervised_model, os.path.join(models_dir, "supervised_xgb.joblib"))
+    joblib.dump(supervised_model, os.path.join(models_dir, "fraud_model.joblib"))
+    joblib.dump(anomaly_model, os.path.join(models_dir, "anomaly_iforest.joblib"))
+    joblib.dump(profile_model, os.path.join(models_dir, "behaviour_profile.joblib"))
+    joblib.dump(graph_model, os.path.join(models_dir, "graph_model.joblib"))
+    joblib.dump(device_model, os.path.join(models_dir, "device_identity_model.joblib"))
+    joblib.dump(meta_model, os.path.join(models_dir, "meta_model.joblib"))
     print("All models serialized successfully.")
 
     # -------------------------------------------------------------
@@ -616,10 +652,11 @@ def main():
     for k, v in latency_report.items():
         print(f"  {k}: {v:.3f} ms")
 
-    # Save docs/ml_report.json
-    with open(os.path.join(DOCS_DIR, "ml_report.json"), "w", encoding="utf-8") as f:
+    # Save docs/ml_report_v2.json (or specified report-file)
+    report_path = os.path.join(DOCS_DIR, args.report_file)
+    with open(report_path, "w", encoding="utf-8") as f:
         json.dump(metrics_report, f, indent=2)
-    print(f"\nSaved report to docs/ml_report.json")
+    print(f"\nSaved report to docs/{args.report_file}")
 
     # -------------------------------------------------------------
     # Visualizations

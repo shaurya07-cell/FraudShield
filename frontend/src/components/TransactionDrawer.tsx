@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import type { ScoredTransaction } from '../types/fraud';
+import { DecisionBadge } from './DecisionBadge';
 
 interface TransactionDrawerProps {
   transaction: ScoredTransaction | null;
@@ -24,28 +25,6 @@ export const TransactionDrawer: React.FC<TransactionDrawerProps> = ({ transactio
   }, [transaction, onClose]);
 
   if (!transaction) return null;
-
-  const getDecisionBadge = (decision: string) => {
-    if (decision === 'ALLOW') {
-      return (
-        <span className="inline-block px-2.5 py-1 text-[12px] font-medium rounded-[4px] bg-[#1E8E5A]/10 text-[#1E8E5A]">
-          Allow
-        </span>
-      );
-    }
-    if (decision === 'REVIEW') {
-      return (
-        <span className="inline-block px-2.5 py-1 text-[12px] font-medium rounded-[4px] bg-[#B7791F]/10 text-[#B7791F]">
-          Review
-        </span>
-      );
-    }
-    return (
-      <span className="inline-block px-2.5 py-1 text-[12px] font-medium rounded-[4px] bg-[#C0362C]/10 text-[#C0362C]">
-        Block
-      </span>
-    );
-  };
 
   const formatAmount = (amt: number) => {
     return `₹${amt.toLocaleString('en-IN', {
@@ -91,8 +70,8 @@ export const TransactionDrawer: React.FC<TransactionDrawerProps> = ({ transactio
             <div>
               <div className="text-[12px] text-[#5B6575] mb-1">Decision & score</div>
               <div className="flex items-center space-x-3">
-                {getDecisionBadge(transaction.decision)}
-                <span className="text-[24px] font-semibold text-[#1B2433] tabular-nums leading-tight">
+                <DecisionBadge decision={transaction.decision} />
+                <span className="text-[24px] font-semibold text-[#1B2433] font-mono tabular-nums leading-tight">
                   {transaction.risk_score}
                 </span>
                 <span className="text-[12px] text-[#5B6575]">/ 100</span>

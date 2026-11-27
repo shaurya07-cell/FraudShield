@@ -8,6 +8,7 @@ import { LatencyChart } from './components/LatencyChart';
 import { LiveFeedTable } from './components/LiveFeedTable';
 import { TransactionDrawer } from './components/TransactionDrawer';
 import { SendMoneyView } from './components/SendMoneyView';
+import { PaymentHome } from './components/PaymentHome';
 import {
   fetchMetrics,
   fetchGraph,
@@ -15,6 +16,7 @@ import {
   runScenario,
   resetSystem,
   subscribeToLiveStream,
+  API_BASE,
 } from './services/api';
 import type {
   OperationalMetrics,
@@ -36,14 +38,28 @@ const initialMetrics: OperationalMetrics = {
   rings_detected: 0,
 };
 
+// Sub-view state for the pay tab
+interface PaySubView {
+  view: 'home' | 'send';
+  mode?: 'simulated' | 'razorpay';
+  autoScan?: boolean;
+  selfTransfer?: boolean;
+}
+
 export const App: React.FC = () => {
   // Navigation
   const [currentTab, setCurrentTab] = useState<'dashboard' | 'pay'>(() => {
     return window.location.pathname === '/pay' ? 'pay' : 'dashboard';
   });
 
+  // Pay sub-navigation: home screen vs send flow
+  const [paySubView, setPaySubView] = useState<PaySubView>({ view: 'home' });
+
   const handleSelectTab = (tab: 'dashboard' | 'pay') => {
     setCurrentTab(tab);
+    if (tab === 'pay') {
+      setPaySubView({ view: 'home' }); // Always return to pay home
+    }
     const newPath = tab === 'pay' ? '/pay' : '/';
     window.history.pushState({}, '', newPath);
   };
@@ -68,6 +84,7 @@ export const App: React.FC = () => {
   // Scenario execution state
   const [isScenarioRunning, setIsScenarioRunning] = useState<boolean>(false);
   const [scenarioStatus, setScenarioStatus] = useState<string | null>(null);
+  const [backendError, setBackendError] = useState<string | null>(null);
 
   // Latency chart history (rolling 30 points)
   const [latencyHistory, setLatencyHistory] = useState<LatencyHistoryPoint[]>([]);
@@ -83,12 +100,10 @@ export const App: React.FC = () => {
     });
 
     // Append latency sample
-    const timeStr = new Date().toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
+    const parsedTime = newTxn.timestamp ? new Date(newTxn.timestamp) : new Date();
+    const timeStr = isNaN(parsedTime.getTime())
+      ? new Date().toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' })
+      : parsedTime.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
 
     setLatencyHistory((prev) => {
       const next = [...prev, { time: timeStr, latency: newTxn.latency_ms }];
@@ -109,6 +124,7 @@ export const App: React.FC = () => {
       setGraphNodes(g.nodes);
       setGraphEdges(g.edges);
       setDetectedRings(g.rings);
+      setBackendError(null);
       setTransactions((prev) => {
         if (prev.length === 0) return txns;
         // Keep existing if already receiving websocket stream
@@ -134,15 +150,17 @@ export const App: React.FC = () => {
         return prev;
       });
     } catch {
-      // Silent error during polling; connection indicator handles UI feedback
+      setBackendError(`Unable to connect to the backend at ${API_BASE}`);
     }
   }, []);
 
   useEffect(() => {
     loadData();
-    const interval = setInterval(loadData, 2000);
+    // Reduce background polling rate while user is in Send money view
+    const intervalTime = currentTab === 'pay' ? 10000 : 2000;
+    const interval = setInterval(loadData, intervalTime);
     return () => clearInterval(interval);
-  }, [loadData]);
+  }, [loadData, currentTab]);
 
   // WebSocket live feed subscription
   useEffect(() => {
@@ -191,6 +209,10 @@ export const App: React.FC = () => {
     setScenarioStatus('Resetting system state...');
     try {
       await resetSystem();
+      setMetrics(initialMetrics);
+      setGraphNodes([]);
+      setGraphEdges([]);
+      setDetectedRings([]);
       setTransactions([]);
       setLatencyHistory([]);
       setSelectedTxn(null);
@@ -203,6 +225,19 @@ export const App: React.FC = () => {
     }
   };
 
+  // Navigate from PaymentHome into the send flow
+  const handleNavigateToSend = (
+    mode: 'simulated' | 'razorpay',
+    options?: { autoScan?: boolean; selfTransfer?: boolean }
+  ) => {
+    setPaySubView({
+      view: 'send',
+      mode,
+      autoScan: options?.autoScan,
+      selfTransfer: options?.selfTransfer,
+    });
+  };
+
   return (
     <div className="min-h-screen bg-[#F4F5F7] text-[#1B2433] flex flex-col font-sans">
       <Navbar
@@ -211,8 +246,28 @@ export const App: React.FC = () => {
         connectionStatus={connectionStatus}
       />
 
+      {/* Backend connection error banner */}
+      {backendError && (
+        <div className="w-full bg-[#C0362C]/10 border-b border-[#C0362C]/20 px-4 py-2.5 text-[13px] text-[#C0362C] text-center">
+          {backendError}
+        </div>
+      )}
+
       {currentTab === 'pay' ? (
-        <SendMoneyView />
+        paySubView.view === 'home' ? (
+          <PaymentHome
+            onNavigateToSend={handleNavigateToSend}
+            onBackToDashboard={() => handleSelectTab('dashboard')}
+          />
+        ) : (
+          <SendMoneyView
+            onBackToDashboard={() => handleSelectTab('dashboard')}
+            onBackToPayHome={() => setPaySubView({ view: 'home' })}
+            initialMode={paySubView.mode}
+            autoScan={paySubView.autoScan}
+            selfTransfer={paySubView.selfTransfer}
+          />
+        )
       ) : (
         <main className="max-w-[1440px] w-full mx-auto px-4 py-4 space-y-4 flex-1">
           {/* Unified Metrics Strip */}

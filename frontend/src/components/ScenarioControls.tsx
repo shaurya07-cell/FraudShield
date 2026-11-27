@@ -14,16 +14,18 @@ export const ScenarioControls: React.FC<ScenarioControlsProps> = ({
   statusMessage,
 }) => {
   return (
-    <div className="w-full bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] p-4">
+    <div className="w-full bg-[#FFFFFF] border border-[#E3E7EE] rounded-[6px] p-4">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[14px] font-medium text-[#1B2433] mr-2">Run a scenario</span>
+          <div className="border-l-[3px] border-l-[#1F4FD8] pl-2.5 py-0.5 mr-2">
+            <span className="text-[14px] font-semibold text-[#1B2433]">Run scenario</span>
+          </div>
 
           <button
             type="button"
             disabled={isRunning}
             onClick={() => onRunScenario('normal', 'Normal traffic')}
-            className="px-3 py-1.5 text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-3 py-1.5 min-h-[44px] text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Normal traffic
           </button>
@@ -32,7 +34,7 @@ export const ScenarioControls: React.FC<ScenarioControlsProps> = ({
             type="button"
             disabled={isRunning}
             onClick={() => onRunScenario('velocity_attack', 'Velocity attack')}
-            className="px-3 py-1.5 text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-3 py-1.5 min-h-[44px] text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Velocity attack
           </button>
@@ -41,7 +43,7 @@ export const ScenarioControls: React.FC<ScenarioControlsProps> = ({
             type="button"
             disabled={isRunning}
             onClick={() => onRunScenario('ring_attack', 'Ring attack')}
-            className="px-3 py-1.5 text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-3 py-1.5 min-h-[44px] text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Ring attack
           </button>
@@ -50,7 +52,7 @@ export const ScenarioControls: React.FC<ScenarioControlsProps> = ({
             type="button"
             disabled={isRunning}
             onClick={() => onRunScenario('fanout_cashout', 'Fan-out cash-out')}
-            className="px-3 py-1.5 text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="px-3 py-1.5 min-h-[44px] text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             Fan-out cash-out
           </button>

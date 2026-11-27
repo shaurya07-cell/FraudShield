@@ -12,3 +12,6 @@ backend/.env
 *.pyc
 
 frontend/dist/
+
+frontend/tsconfig.app.tsbuildinfo
+backend/models_backup_*/

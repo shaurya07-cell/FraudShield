@@ -75,6 +75,7 @@ export interface GatewayAccount {
 
 export interface GatewayPaymentRecord {
   payment_id: string;
+  reference_id?: string;
   created_at: string;
   from_account: string;
   to_account: string;
@@ -92,6 +93,7 @@ export interface GatewayPaymentRecord {
 
 export interface GatewayPayResponse {
   payment_id: string;
+  reference_id?: string;
   status: 'SUCCESS' | 'PENDING_VERIFICATION' | 'DECLINED' | 'FAILED';
   decision: Decision | null;
   risk_score: number;
@@ -107,6 +109,7 @@ export interface GatewayPayResponse {
 
 export interface GatewayConfirmResponse {
   payment_id: string;
+  reference_id?: string;
   status: string;
   message: string;
   sender_balance_after: number | null;

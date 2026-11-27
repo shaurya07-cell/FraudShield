@@ -14,8 +14,12 @@ import type {
   ScoredTransaction,
 } from '../types/fraud';
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://127.0.0.1:8000';
-const WS_BASE = import.meta.env.VITE_WS_URL || 'ws://127.0.0.1:8000';
+const defaultHost = typeof window !== 'undefined' && window.location.hostname ? window.location.hostname : '127.0.0.1';
+const envBase = import.meta.env.VITE_API_BASE as string | undefined;
+export const API_BASE = envBase ? envBase.replace(/\/+$/, '') : `http://${defaultHost}:8000`;
+const WS_BASE = envBase
+  ? API_BASE.replace(/^http/, 'ws')
+  : `ws://${defaultHost}:8000`;
 
 export async function fetchMetrics(): Promise<OperationalMetrics> {
   const res = await fetch(`${API_BASE}/metrics`);
@@ -171,6 +175,39 @@ export async function confirmGatewayPayment(paymentId: string, otp: string): Pro
     throw new Error(errorData.detail || `Payment confirmation failed.`);
   }
 
+  return res.json();
+}
+
+export interface PaymentReceipt {
+  receipt_number: string;
+  reference_id: string;
+  payment_id: string;
+  status: string;
+  timestamp: string;
+  payer: {
+    account_id: string;
+    name: string;
+  };
+  payee: {
+    account_id: string;
+    name: string;
+  };
+  amount: number;
+  currency: string;
+  payment_mode: string;
+  decision?: string;
+  risk_score: number;
+  reasons: Array<{ rule: string; detail: string; weight: number }>;
+  fraud_verified: boolean;
+  message: string;
+}
+
+export async function fetchPaymentReceipt(referenceId: string): Promise<PaymentReceipt> {
+  const res = await fetch(`${API_BASE}/payments/${encodeURIComponent(referenceId)}/receipt`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Receipt not available.');
+  }
   return res.json();
 }
 

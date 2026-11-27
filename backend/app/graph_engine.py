@@ -129,7 +129,14 @@ class GraphEngine:
         }
 
     def add_transaction(self, txn: Transaction, risk: float = 0.0) -> None:
-        """Add directed edge between sender and receiver with transaction weight."""
+        """Add directed edge between sender and receiver with transaction weight.
+
+        Live and Training Parity Rule:
+        Node risk must ONLY be derived from heuristic or scoring-time signals available
+        prior to ground-truth label revelation (e.g. rule-based scoring or evaluated score).
+        Ground-truth labels (is_fraud) must NEVER be passed here to prevent label leakage
+        into neighbor_avg_risk and ring calculations.
+        """
         if not self.graph.has_node(txn.sender_id):
             self.graph.add_node(txn.sender_id)
         if not self.graph.has_node(txn.receiver_id):

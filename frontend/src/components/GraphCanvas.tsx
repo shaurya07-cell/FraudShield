@@ -19,9 +19,10 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, rings })
   useEffect(() => {
     const updateSize = () => {
       if (containerRef.current) {
+        const minH = window.innerWidth < 640 ? 260 : 360;
         setDimensions({
           width: containerRef.current.clientWidth,
-          height: Math.max(380, containerRef.current.clientHeight),
+          height: Math.max(minH, containerRef.current.clientHeight),
         });
       }
     };
@@ -36,6 +37,19 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, rings })
 
   const graphData = useMemo(() => {
     const currentNodes = cachedNodesRef.current;
+    if (nodes.length === 0) {
+      currentNodes.clear();
+      return { nodes: [], links: [] };
+    }
+
+    // Clean up stale nodes no longer present in incoming graph
+    const incomingIds = new Set(nodes.map((n) => n.id));
+    for (const key of currentNodes.keys()) {
+      if (!incomingIds.has(key)) {
+        currentNodes.delete(key);
+      }
+    }
+
     const reconciledNodes: GraphNode[] = [];
 
     // Reconcile nodes keeping x, y, vx, vy stable
@@ -81,18 +95,18 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, rings })
     const count = node.txn_count || 1;
     const radius = Math.max(4, Math.min(18, 4 + Math.sqrt(count) * 2));
 
-    let fillColor = '#1E8E5A'; // allow
+    let fillColor = '#13805B'; // allow
     if (node.risk >= 70) {
-      fillColor = '#C0362C'; // block
+      fillColor = '#C53030'; // block
     } else if (node.risk >= 40) {
       fillColor = '#B7791F'; // review
     }
 
-    // Outer dark red ring outline for ring members
+    // Outer ring outline for ring members - violet token
     if (node.ring_id) {
       ctx.beginPath();
       ctx.arc(x, y, radius + 3 / globalScale, 0, 2 * Math.PI, false);
-      ctx.strokeStyle = '#991B1B';
+      ctx.strokeStyle = '#6D5BD0';
       ctx.lineWidth = 2.5 / globalScale;
       ctx.stroke();
     }
@@ -117,9 +131,9 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, rings })
     const tNode = cachedNodesRef.current.get(tId);
 
     if (sNode?.ring_id && tNode?.ring_id && sNode.ring_id === tNode.ring_id) {
-      return '#C0362C'; // Red edge connecting ring members
+      return '#6D5BD0'; // Violet edge connecting ring members
     }
-    return '#DCE0E7'; // Clean gray for standard relationships
+    return '#E3E7EE'; // Slate/line gray for standard relationships
   }, []);
 
   const getLinkWidth = useCallback((link: any) => {
@@ -148,33 +162,35 @@ export const GraphCanvas: React.FC<GraphCanvasProps> = ({ nodes, edges, rings })
   }, []);
 
   return (
-    <div className="w-full bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] p-4 flex flex-col relative">
-      <div className="flex items-center justify-between pb-3 border-b border-[#DCE0E7] mb-2">
-        <h2 className="text-[16px] font-medium text-[#1B2433]">Account network</h2>
+    <div className="w-full bg-[#FFFFFF] border border-[#E3E7EE] rounded-[6px] p-4 flex flex-col relative">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#E3E7EE] mb-2">
+        <div className="border-l-[3px] border-l-[#1F4FD8] pl-2.5 py-0.5">
+          <h2 className="text-[15px] font-semibold text-[#1B2433]">Account network</h2>
+        </div>
 
         {/* Legend */}
-        <div className="flex items-center space-x-4 text-[12px] text-[#5B6575]">
+        <div className="flex flex-wrap gap-x-3 gap-y-1 text-[12px] text-[#8A94A6]">
           <div className="flex items-center space-x-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#1E8E5A]" />
-            <span>Allow</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#13805B]" />
+            <span className="text-[#1B2433]">Allow</span>
           </div>
           <div className="flex items-center space-x-1.5">
             <span className="w-2.5 h-2.5 rounded-full bg-[#B7791F]" />
-            <span>Review</span>
+            <span className="text-[#1B2433]">Review</span>
           </div>
           <div className="flex items-center space-x-1.5">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#C0362C]" />
-            <span>Block</span>
+            <span className="w-2.5 h-2.5 rounded-full bg-[#C53030]" />
+            <span className="text-[#1B2433]">Block</span>
           </div>
           <div className="flex items-center space-x-1.5">
-            <span className="w-3 h-3 rounded-full border-2 border-[#991B1B] bg-transparent" />
-            <span>Ring member</span>
+            <span className="w-2.5 h-2.5 rounded-full border-2 border-[#6D5BD0] bg-transparent" />
+            <span className="text-[#1B2433]">Ring link</span>
           </div>
         </div>
       </div>
 
       {/* Canvas container */}
-      <div ref={containerRef} className="w-full h-[460px] relative overflow-hidden bg-[#FFFFFF]">
+      <div ref={containerRef} className="w-full h-[280px] sm:h-[360px] relative overflow-hidden bg-[#FFFFFF]">
         {graphData.nodes.length === 0 ? (
           <div className="w-full h-full flex items-center justify-center text-[13px] text-[#5B6575]">
             No network data available. Run a scenario to see account activity.
