@@ -1,4 +1,5 @@
 """Machine Learning scoring module for FraudShield."""
+import logging
 import math
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -9,6 +10,8 @@ import numpy as np
 from app.graph_engine import GLOBAL_GRAPH
 from app.schemas import Transaction
 from app.state import EngineState, GLOBAL_STATE, parse_timestamp
+
+logger = logging.getLogger(__name__)
 
 FEATURE_NAMES: List[str] = [
     "amount",
@@ -32,9 +35,47 @@ FEATURE_NAMES: List[str] = [
     "neighbor_avg_risk",
 ]
 
-DEFAULT_MODEL_PATH = os.path.abspath(
-    os.path.join(os.path.dirname(__file__), "..", "models", "fraud_model.joblib")
+DEFAULT_MODELS_DIR = os.path.abspath(
+    os.path.join(os.path.dirname(__file__), "..", "models")
 )
+
+
+def get_models_dir() -> str:
+    """Resolve models directory using FRAUDSHIELD_MODELS_DIR or fallback to backend/models.
+
+    If FRAUDSHIELD_MODELS_DIR is provided but invalid or missing required model artifacts,
+    logs a warning and safely falls back to backend/models.
+    """
+    override = os.environ.get("FRAUDSHIELD_MODELS_DIR")
+    if not override:
+        return DEFAULT_MODELS_DIR
+
+    candidate_dir = os.path.abspath(override)
+    if not os.path.isdir(candidate_dir):
+        logger.warning(
+            "FRAUDSHIELD_MODELS_DIR='%s' does not exist or is not a directory. "
+            "Falling back to default '%s'.",
+            candidate_dir,
+            DEFAULT_MODELS_DIR,
+        )
+        return DEFAULT_MODELS_DIR
+
+    # Check for primary model artifacts
+    primary_file = os.path.join(candidate_dir, "fraud_model.joblib")
+    supervised_file = os.path.join(candidate_dir, "supervised_xgb.joblib")
+    if not (os.path.isfile(primary_file) or os.path.isfile(supervised_file)):
+        logger.warning(
+            "FRAUDSHIELD_MODELS_DIR='%s' is missing required model file (fraud_model.joblib or supervised_xgb.joblib). "
+            "Falling back to default '%s'.",
+            candidate_dir,
+            DEFAULT_MODELS_DIR,
+        )
+        return DEFAULT_MODELS_DIR
+
+    return candidate_dir
+
+
+DEFAULT_MODEL_PATH = os.path.join(get_models_dir(), "fraud_model.joblib")
 
 
 def extract_features(
