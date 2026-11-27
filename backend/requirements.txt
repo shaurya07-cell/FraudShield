@@ -1,0 +1,11 @@
+fastapi
+uvicorn[standard]
+networkx
+pandas
+numpy
+scikit-learn
+xgboost
+faker
+pydantic
+websockets
+pytest
