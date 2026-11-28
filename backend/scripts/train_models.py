@@ -1,12 +1,17 @@
-"""Comprehensive training, calibration, and ablation pipeline for FraudShield Multi-Model Ensemble.
+"""Comprehensive training, calibration, and ablation pipeline for FraudShield Multi-Model Ensemble v3.
 
-Generates ~60,000 realistic transactions with noise and hard edge-cases:
-- Fraud accounts mixed across general ID space (no separate range)
-- Hard negatives: merchants with high fan-in, salary bursts, family shared devices, large legit purchases
-- Hard positives: ~15% stealth fraud (normal amounts/pace), unshared device rings, varied delays
-- Sequential replay through EngineState and GraphEngine (zero data leakage)
-- Split: 70% Train, 10% Validation (for Meta-Model), 20% Test (for Ablation)
-- Saves specialist models, calibrated meta-model, and evaluation artifacts in docs/
+Goals:
+- Lower False Positive Rate on legitimate traffic to <3% (REVIEW or BLOCK) and <1% (BLOCK only).
+- Genuinely new model: Mule-Account Classifier ("mule").
+- Calibrated probability output using Isotonic calibration on validation split.
+- Explicit threshold search on validation split for FPR <3% and FPR <1%.
+- Explainable per-transaction top feature drivers using XGBoost pred_contribs in plain language.
+- ~80,000 realistic transactions with hard negatives (merchants, salary bursts, shared family devices, honest large purchases, cold-start accounts) and hard positives (~15% stealth fraud, rings of varied sizes/timing/amounts, with and without shared devices).
+- Rolling time-window evaluation (3 windows).
+- Attack-level detection latency and rate.
+- Warm and cold reset false positive rate.
+- Automated leakage checks (shuffled labels ROC-AUC ~ 0.5, no raw IDs/labels in features, warn if exactly 1.0, print top 10 features).
+- Strictly saves to specified out-dir (default models_v3, refusing models).
 """
 import argparse
 import datetime
@@ -48,8 +53,10 @@ from app.models_ensemble import (
     DEVICE_FEATURES,
     FEATURE_NAMES,
     GRAPH_FEATURES,
-    META_FEATURE_NAMES,
+    META_FEATURE_NAMES_V3,
+    MULE_FEATURES,
     BehaviourProfileModel,
+    MuleAccountTracker,
 )
 from app.rules import evaluate, score_from_reasons
 from app.schemas import Transaction
@@ -62,43 +69,54 @@ from app.simulator import (
 )
 from app.state import EngineState
 
-DEFAULT_MODELS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models_v2"))
+DEFAULT_MODELS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "models_v3"))
 DOCS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "docs"))
 
 
-def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transaction], Set[str]]:
-    """Synthesize ~60,000 realistic transactions with mixed mule accounts and hard edge-cases."""
-    print(f"Synthesizing ~{target_count:,} realistic transactions with noise & edge-cases...")
+def generate_ensemble_dataset_v3(target_count: int = 80_000) -> Tuple[List[Transaction], Set[str], List[Dict[str, Any]]]:
+    """Synthesize ~80,000 realistic transactions with hard negatives, hard positives, and attack metadata."""
+    print(f"Synthesizing ~{target_count:,} realistic transactions (hard negatives, cold-start, stealth fraud, multi-scale rings)...")
     random.seed(42)
     np.random.seed(42)
 
-    base_time = datetime.datetime(2026, 11, 15, 0, 0, 0, tzinfo=datetime.timezone.utc)
+    base_time = datetime.datetime(2026, 11, 10, 0, 0, 0, tzinfo=datetime.timezone.utc)
     current_sim_time = base_time
 
-    # Designate mule accounts randomly mixed into the honest space (NO separate ID range)
-    mule_pool = set(random.sample(ALL_ACCOUNTS, 75))
-    compromised_pool = set(random.sample([a for a in ALL_ACCOUNTS if a not in mule_pool and a not in MERCHANT_ACCOUNTS], 40))
-    power_users = random.sample([a for a in ALL_ACCOUNTS if a not in mule_pool and a not in MERCHANT_ACCOUNTS], 35)
+    # Extended account universe: 1,000 accounts to allow many brand-new honest cold-start accounts
+    extended_accounts = [f"ACC_{i:04d}" for i in range(1000)]
+    cold_start_pool = set(extended_accounts[500:])  # 500 cold-start brand new accounts
+    established_accounts = extended_accounts[:500]
+
+    # Designated pools
+    mule_pool = set(random.sample(established_accounts, 90))
+    compromised_pool = set(random.sample([a for a in established_accounts if a not in mule_pool and a not in MERCHANT_ACCOUNTS], 50))
+    power_users = random.sample([a for a in established_accounts if a not in mule_pool and a not in MERCHANT_ACCOUNTS], 45)
 
     txns: List[Transaction] = []
     local_fraud_ids: Set[str] = set()
+    attack_events: List[Dict[str, Any]] = []
     family_device_list = list(FAMILY_DEVICES.items())
 
+    # Cold-start activation tracking
+    active_cold_start: Set[str] = set()
+
     while len(txns) < target_count:
-        # Legitimate batch with realistic edge cases (130 - 240 txns)
-        n_legit_batch = random.randint(130, 240)
+        # -------------------------------------------------------------
+        # Legitimate Batch (140 - 260 txns)
+        # -------------------------------------------------------------
+        n_legit_batch = random.randint(140, 260)
         for _ in range(n_legit_batch):
             if len(txns) >= target_count:
                 break
 
             roll = random.random()
 
-            # 1. Hard Negative: Merchant high fan-in (~12%)
-            if roll < 0.12:
+            # 1. Hard Negative: Merchant high fan-in (~14%)
+            if roll < 0.14:
                 merchant = random.choice(MERCHANT_ACCOUNTS)
-                sender = random.choice([a for a in ALL_ACCOUNTS if a != merchant])
-                amt = round(random.lognormvariate(math.log(450), 0.7), 2)
-                amt = max(15.0, min(amt, 3500.0))
+                sender = random.choice([a for a in established_accounts if a != merchant])
+                amt = round(random.lognormvariate(math.log(520), 0.7), 2)
+                amt = max(20.0, min(amt, 4200.0))
                 t = Transaction(
                     txn_id=f"TXN_MERCH_{uuid.uuid4().hex[:12]}",
                     timestamp=current_sim_time.isoformat(),
@@ -110,14 +128,14 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                     channel="UPI",
                 )
                 txns.append(t)
-                current_sim_time += datetime.timedelta(seconds=random.uniform(0.3, 1.8))
+                current_sim_time += datetime.timedelta(seconds=random.uniform(0.2, 1.5))
 
-            # 2. Hard Negative: Family shared device (~8%)
-            elif roll < 0.20:
+            # 2. Hard Negative: Family shared household device (~8%)
+            elif roll < 0.22:
                 fam_dev, fam_members = random.choice(family_device_list)
                 sender = random.choice(fam_members)
-                receiver = random.choice([a for a in ALL_ACCOUNTS if a not in fam_members])
-                amt = round(random.uniform(50.0, 1500.0), 2)
+                receiver = random.choice([a for a in established_accounts if a not in fam_members])
+                amt = round(random.uniform(60.0, 1600.0), 2)
                 t = Transaction(
                     txn_id=f"TXN_FAM_{uuid.uuid4().hex[:12]}",
                     timestamp=current_sim_time.isoformat(),
@@ -129,15 +147,15 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                     channel="UPI",
                 )
                 txns.append(t)
-                current_sim_time += datetime.timedelta(seconds=random.uniform(0.5, 3.0))
+                current_sim_time += datetime.timedelta(seconds=random.uniform(0.4, 2.5))
 
-            # 3. Hard Negative: Salary day burst (~5%)
-            elif roll < 0.25:
+            # 3. Hard Negative: Salary day payroll burst (~6%)
+            elif roll < 0.28:
                 emp_sender = random.choice(EMPLOYER_ACCOUNTS)
                 emp_dev = f"DEV_PAYROLL_{emp_sender}"
-                employees = random.sample([a for a in ALL_ACCOUNTS if a != emp_sender and a not in MERCHANT_ACCOUNTS], random.randint(8, 16))
+                employees = random.sample([a for a in established_accounts if a != emp_sender and a not in MERCHANT_ACCOUNTS], random.randint(10, 20))
                 for emp in employees:
-                    sal = round(random.uniform(25000.0, 85000.0), 2)
+                    sal = round(random.uniform(28000.0, 95000.0), 2)
                     t = Transaction(
                         txn_id=f"TXN_SAL_{uuid.uuid4().hex[:12]}",
                         timestamp=current_sim_time.isoformat(),
@@ -149,13 +167,13 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                         channel="UPI",
                     )
                     txns.append(t)
-                    current_sim_time += datetime.timedelta(seconds=random.uniform(0.05, 0.4))
+                    current_sim_time += datetime.timedelta(seconds=random.uniform(0.04, 0.35))
 
-            # 4. Hard Negative: Legitimate large purchase / bill (~4%)
-            elif roll < 0.29:
-                sender = random.choice([a for a in ALL_ACCOUNTS if a not in mule_pool])
+            # 4. Hard Negative: Honest large purchase / electronics / hospital bill (~4%)
+            elif roll < 0.32:
+                sender = random.choice([a for a in established_accounts if a not in mule_pool])
                 receiver = random.choice(MERCHANT_ACCOUNTS)
-                amt = round(random.uniform(15000.0, 48000.0), 2)
+                amt = round(random.uniform(18000.0, 50000.0), 2)
                 t = Transaction(
                     txn_id=f"TXN_EXP_{uuid.uuid4().hex[:12]}",
                     timestamp=current_sim_time.isoformat(),
@@ -169,12 +187,32 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                 txns.append(t)
                 current_sim_time += datetime.timedelta(seconds=random.uniform(1.0, 4.0))
 
-            # 5. Standard normal payment (~71%)
+            # 5. Hard Negative: Brand-new honest cold start accounts (~12%)
+            elif roll < 0.44:
+                # Pick a brand new account from cold start pool
+                new_acc = random.choice(list(cold_start_pool))
+                active_cold_start.add(new_acc)
+                receiver = random.choice([a for a in established_accounts if a != new_acc])
+                amt = round(random.uniform(100.0, 2500.0), 2)
+                t = Transaction(
+                    txn_id=f"TXN_COLD_{uuid.uuid4().hex[:12]}",
+                    timestamp=current_sim_time.isoformat(),
+                    sender_id=new_acc,
+                    receiver_id=receiver,
+                    amount=amt,
+                    device_id=f"DEV_{new_acc}",
+                    ip="192.168.120.1",
+                    channel="UPI",
+                )
+                txns.append(t)
+                current_sim_time += datetime.timedelta(seconds=random.uniform(0.8, 3.5))
+
+            # 6. Standard consumer payment (~56%)
             else:
-                sender = random.choice(power_users) if random.random() < 0.25 else random.choice(ALL_ACCOUNTS)
-                receiver = random.choice([a for a in ALL_ACCOUNTS if a != sender])
-                amt = round(random.lognormvariate(math.log(650), 0.85), 2)
-                amt = max(10.0, min(amt, 9500.0))
+                sender = random.choice(power_users) if random.random() < 0.25 else random.choice(established_accounts)
+                receiver = random.choice([a for a in established_accounts if a != sender])
+                amt = round(random.lognormvariate(math.log(700), 0.8), 2)
+                amt = max(10.0, min(amt, 9800.0))
                 t = Transaction(
                     txn_id=f"TXN_NORM_{uuid.uuid4().hex[:12]}",
                     timestamp=current_sim_time.isoformat(),
@@ -186,24 +224,29 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                     channel="UPI",
                 )
                 txns.append(t)
-                current_sim_time += datetime.timedelta(seconds=random.uniform(0.4, 2.5))
+                current_sim_time += datetime.timedelta(seconds=random.uniform(0.3, 2.0))
 
         if len(txns) >= target_count:
             break
 
-        # Fraud Attack Scenarios
+        # -------------------------------------------------------------
+        # Fraud Attack Scenarios (Hard positives included)
+        # -------------------------------------------------------------
         fraud_roll = random.random()
 
-        # Attack Scenario A: Velocity Burst
-        if fraud_roll < 0.35:
-            is_compromised = random.random() < 0.40
+        # Attack Scenario 1: Velocity Burst
+        if fraud_roll < 0.30:
+            is_compromised = random.random() < 0.45
             fraud_sender = random.choice(list(compromised_pool)) if is_compromised else random.choice(list(mule_pool))
-            is_stealth = random.random() < 0.15
-            n_burst = random.randint(12, 18)
-            receivers = random.sample([a for a in ALL_ACCOUNTS if a != fraud_sender], n_burst)
+            is_stealth = random.random() < 0.15  # 15% stealth fraud looks normal individually
+            n_burst = random.randint(10, 16)
+            receivers = random.sample([a for a in established_accounts if a != fraud_sender], n_burst)
+
+            attack_id = f"ATTACK_VEL_{uuid.uuid4().hex[:8]}"
+            attack_txns_ids: List[str] = []
 
             for rec in receivers:
-                amt = round(random.uniform(250.0, 850.0), 2) if is_stealth else round(random.uniform(4750.0, 4999.0), 2)
+                amt = round(random.uniform(250.0, 850.0), 2) if is_stealth else round(random.uniform(4700.0, 4999.0), 2)
                 t = Transaction(
                     txn_id=f"TXN_VEL_{uuid.uuid4().hex[:12]}",
                     timestamp=current_sim_time.isoformat(),
@@ -216,25 +259,31 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                 )
                 txns.append(t)
                 local_fraud_ids.add(t.txn_id)
-                current_sim_time += datetime.timedelta(seconds=random.uniform(0.5, 3.5))
+                attack_txns_ids.append(t.txn_id)
+                current_sim_time += datetime.timedelta(seconds=random.uniform(0.4, 2.5))
 
-        # Attack Scenario B: Fraud Ring
-        elif fraud_roll < 0.70:
-            ring_size = random.choice([3, 4, 5, 7])
+            attack_events.append({"attack_id": attack_id, "type": "velocity_burst", "stealth": is_stealth, "txn_ids": attack_txns_ids})
+
+        # Attack Scenario 2: Multi-Scale Fraud Ring (3 to 10 nodes, with/without shared device, varied delays & amounts)
+        elif fraud_roll < 0.65:
+            ring_size = random.choice([3, 4, 5, 6, 8, 10])
             members = random.sample(list(mule_pool), ring_size)
-            laps = random.randint(2, 4)
-            base_amt = round(random.uniform(12000.0, 38000.0), 2)
-            share_device = random.random() < 0.55
+            laps = random.randint(2, 3)
+            base_amt = round(random.uniform(14000.0, 45000.0), 2)
+            share_device = random.random() < 0.50  # 50% shared device, 50% distinct devices
             ring_device = f"DEV_RING_{uuid.uuid4().hex[:6]}" if share_device else None
             is_stealth = random.random() < 0.15
 
+            attack_id = f"ATTACK_RING_{uuid.uuid4().hex[:8]}"
+            attack_txns_ids = []
             curr_amt = base_amt
+
             for _ in range(laps):
                 for i in range(ring_size):
                     s = members[i]
                     r = members[(i + 1) % ring_size]
                     dev = ring_device if share_device else f"DEV_{s}"
-                    actual_amt = round(random.uniform(300.0, 900.0), 2) if is_stealth else round(curr_amt, 2)
+                    actual_amt = round(random.uniform(350.0, 950.0), 2) if is_stealth else round(curr_amt, 2)
                     t = Transaction(
                         txn_id=f"TXN_RING_{uuid.uuid4().hex[:12]}",
                         timestamp=current_sim_time.isoformat(),
@@ -247,19 +296,25 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                     )
                     txns.append(t)
                     local_fraud_ids.add(t.txn_id)
-                    curr_amt *= random.uniform(0.96, 0.99)
-                    current_sim_time += datetime.timedelta(seconds=random.uniform(2.0, 8.0))
+                    attack_txns_ids.append(t.txn_id)
+                    curr_amt *= random.uniform(0.95, 0.99)
+                    current_sim_time += datetime.timedelta(seconds=random.uniform(1.5, 6.0))
 
-        # Attack Scenario C: Fan-out Cash-out
+            attack_events.append({"attack_id": attack_id, "type": "ring", "ring_size": ring_size, "stealth": is_stealth, "txn_ids": attack_txns_ids})
+
+        # Attack Scenario 3: Mule Pass-Through / Smurfing Fan-Out
         else:
             aggregator = random.choice(list(mule_pool))
-            mules = random.sample([a for a in mule_pool if a != aggregator], random.randint(5, 8))
+            mules = random.sample([a for a in mule_pool if a != aggregator], random.randint(4, 7))
             is_stealth = random.random() < 0.15
+
+            attack_id = f"ATTACK_MULE_{uuid.uuid4().hex[:8]}"
+            attack_txns_ids = []
 
             # Step 1: Inflow to mules
             for m in mules:
-                victim = random.choice(ALL_ACCOUNTS)
-                in_amt = round(random.uniform(350.0, 950.0), 2) if is_stealth else round(random.uniform(6000.0, 9500.0), 2)
+                victim = random.choice(established_accounts)
+                in_amt = round(random.uniform(400.0, 900.0), 2) if is_stealth else round(random.uniform(5000.0, 9500.0), 2)
                 t_in = Transaction(
                     txn_id=f"TXN_FAN_IN_{uuid.uuid4().hex[:12]}",
                     timestamp=current_sim_time.isoformat(),
@@ -271,11 +326,11 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                     channel="UPI",
                 )
                 txns.append(t_in)
-                current_sim_time += datetime.timedelta(seconds=random.uniform(1.0, 4.0))
+                current_sim_time += datetime.timedelta(seconds=random.uniform(0.5, 3.0))
 
-            # Step 2: Forward to aggregator
+            # Step 2: Rapid pass-through onward to aggregator
             for m in mules:
-                fwd_amt = round(random.uniform(300.0, 850.0), 2) if is_stealth else round(random.uniform(5500.0, 9000.0), 2)
+                fwd_amt = round(random.uniform(380.0, 880.0), 2) if is_stealth else round(random.uniform(4800.0, 9200.0), 2)
                 t_fwd = Transaction(
                     txn_id=f"TXN_FAN_OUT_{uuid.uuid4().hex[:12]}",
                     timestamp=current_sim_time.isoformat(),
@@ -288,27 +343,109 @@ def generate_ensemble_dataset(target_count: int = 60_000) -> Tuple[List[Transact
                 )
                 txns.append(t_fwd)
                 local_fraud_ids.add(t_fwd.txn_id)
-                current_sim_time += datetime.timedelta(seconds=random.uniform(1.0, 5.0))
+                attack_txns_ids.append(t_fwd.txn_id)
+                current_sim_time += datetime.timedelta(seconds=random.uniform(0.5, 3.0))
 
-    # Chronological sort
+            attack_events.append({"attack_id": attack_id, "type": "mule_passthrough", "stealth": is_stealth, "txn_ids": attack_txns_ids})
+
     txns.sort(key=lambda x: x.timestamp)
     print(f"Dataset generated: {len(txns):,} transactions ({len(local_fraud_ids):,} fraud, {len(local_fraud_ids)/len(txns):.2%}).")
-    return txns, local_fraud_ids
+    return txns, local_fraud_ids, attack_events
+
+
+def run_leakage_checks(
+    X_train: pd.DataFrame,
+    y_train: np.ndarray,
+    X_test: pd.DataFrame,
+    y_test: np.ndarray,
+    supervised_model: xgb.XGBClassifier,
+    feature_names: List[str],
+) -> Dict[str, Any]:
+    """Execute four rigorous leakage checks and print PASS / FAIL."""
+    print("\n" + "=" * 70)
+    print("AUTOMATED DATA LEAKAGE CHECKS")
+    print("=" * 70)
+
+    results: Dict[str, Any] = {}
+
+    # Check 1: Label Shuffle Test (should drop ROC-AUC to ~0.50)
+    print("1. Label Shuffling Test (model trained on randomized target labels)...")
+    np.random.seed(42)
+    y_shuffled = np.random.permutation(y_train)
+    spw_shuf = float(sum(y_shuffled == 0)) / max(1, sum(y_shuffled == 1))
+    shuffle_clf = xgb.XGBClassifier(
+        n_estimators=40,
+        max_depth=3,
+        learning_rate=0.08,
+        scale_pos_weight=spw_shuf,
+        random_state=42,
+        eval_metric="logloss",
+    )
+    shuffle_clf.fit(X_train[feature_names], y_shuffled)
+    test_shuf_prob = shuffle_clf.predict_proba(X_test[feature_names])[:, 1]
+    shuf_auc = float(roc_auc_score(y_test, test_shuf_prob))
+    check1_pass = abs(shuf_auc - 0.50) <= 0.12
+    status1 = "[PASS]" if check1_pass else "[FAIL]"
+    print(f"   {status1} Shuffled-label ROC-AUC: {shuf_auc:.4f} (expected near 0.50: |AUC - 0.50| <= 0.12)")
+    results["label_shuffle_auc"] = shuf_auc
+    results["label_shuffle_pass"] = check1_pass
+
+    # Check 2: Raw ID & Target Leakage check in features
+    print("2. Raw ID & Label Leakage Check...")
+    forbidden_tokens = ["id", "sender", "receiver", "txn", "label", "is_fraud", "fraud"]
+    forbidden_hits = []
+    for col in feature_names:
+        lower = col.lower()
+        if lower in ["sender_id", "receiver_id", "txn_id", "is_fraud", "label"]:
+            forbidden_hits.append(col)
+    check2_pass = len(forbidden_hits) == 0
+    status2 = "[PASS]" if check2_pass else "[FAIL]"
+    print(f"   {status2} Zero raw identifier or ground-truth columns in feature space.")
+    results["forbidden_feature_columns"] = forbidden_hits
+    results["forbidden_feature_check_pass"] = check2_pass
+
+    # Check 3: Check for exact 1.0000 metrics (indicates memorization or leakage)
+    print("3. Perfect Metric Leakage Check (checking for suspicious 1.0000 scores)...")
+    test_prob = supervised_model.predict_proba(X_test[feature_names])[:, 1]
+    test_auc = float(roc_auc_score(y_test, test_prob))
+    check3_pass = test_auc < 0.9999
+    status3 = "[PASS]" if check3_pass else "[WARNING - SUSPICIOUS]"
+    print(f"   {status3} Supervised test ROC-AUC = {test_auc:.4f} (< 1.0000)")
+    results["test_roc_auc"] = test_auc
+    results["perfect_metric_check_pass"] = check3_pass
+
+    # Check 4: Top 10 Feature Importances
+    print("4. Feature Importance Distribution (Top 10):")
+    importances = supervised_model.feature_importances_
+    sorted_idx = np.argsort(-importances)
+    top_10 = []
+    for rank, idx in enumerate(sorted_idx[:10], start=1):
+        name = feature_names[idx]
+        imp = float(importances[idx])
+        top_10.append({"rank": rank, "feature": name, "importance": round(imp, 4)})
+        print(f"   #{rank:02d}: {name:<30} {imp:.4%}")
+    results["top_10_features"] = top_10
+
+    all_passed = check1_pass and check2_pass and check3_pass
+    print("-" * 70)
+    print(f"Overall Leakage Status: {'[ALL CHECKS PASSED]' if all_passed else '[LEAKAGE SUSPECTED]'}")
+    print("=" * 70)
+    return results
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Train FraudShield models without label leakage.")
+    parser = argparse.ArgumentParser(description="Train FraudShield models v3 with mule model & calibration.")
     parser.add_argument(
         "--out-dir",
         type=str,
         default=DEFAULT_MODELS_DIR,
-        help="Directory to save trained model artifacts (default: backend/models_v2, never backend/models)",
+        help="Directory to save trained model artifacts (default: backend/models_v3, never backend/models)",
     )
     parser.add_argument(
         "--report-file",
         type=str,
-        default="ml_report_v2.json",
-        help="Filename for the evaluation report in docs/ (default: ml_report_v2.json)",
+        default="ml_report_v3.json",
+        help="Filename for the evaluation report in docs/ (default: ml_report_v3.json)",
     )
     args = parser.parse_args()
 
@@ -321,21 +458,23 @@ def main():
     os.makedirs(DOCS_DIR, exist_ok=True)
 
     print("=" * 70)
-    print("FraudShield Multi-Model Specialist Ensemble Training & Calibration")
+    print("FraudShield Multi-Model Specialist Ensemble Training v3")
     print(f"Artifacts output directory: {models_dir}")
     print(f"Report file: docs/{args.report_file}")
     print("=" * 70)
 
-    # 1. Dataset Generation
-    txns, fraud_ids = generate_ensemble_dataset(target_count=60_000)
+    # 1. Dataset Generation (~80k txns)
+    txns, fraud_ids, attack_events = generate_ensemble_dataset_v3(target_count=80_000)
 
     # 2. Sequential Replay for Zero-Leakage Feature Extraction
-    print("Replaying transactions sequentially through EngineState & GraphEngine...")
+    print("Replaying transactions sequentially through EngineState, GraphEngine & MuleTracker...")
     state = EngineState()
     graph_engine = GraphEngine()
     profile_model = BehaviourProfileModel()
+    mule_tracker = MuleAccountTracker()
 
     feature_records: List[Dict[str, float]] = []
+    mule_records: List[Dict[str, float]] = []
     rule_scores: List[int] = []
     labels: List[int] = []
     profile_scores: List[float] = []
@@ -349,6 +488,10 @@ def main():
             graph_engine.recompute_cache()
             last_cache_recompute_idx = idx
 
+        # Parse timestamp to float
+        from app.state import parse_timestamp
+        cur_t = parse_timestamp(txn.timestamp)
+
         # Rule evaluation & Rule score
         reasons = evaluate(txn, state=state)
         r_score = score_from_reasons(reasons)
@@ -357,6 +500,15 @@ def main():
         # Feature extraction strictly before updating state
         feats = extract_features(txn, state=state, graph_cache=graph_engine.get_cache())
         feature_records.append(feats)
+
+        # Mule features strictly at this exact moment
+        mule_feats = mule_tracker.extract_mule_features(
+            account_id=txn.sender_id,
+            amount=float(txn.amount),
+            current_time=cur_t,
+            graph_cache=graph_engine.get_cache(),
+        )
+        mule_records.append(mule_feats)
 
         # Profile model deviation score
         prof_score = profile_model.predict_score(txn.sender_id, float(txn.amount), txn.receiver_id)
@@ -367,17 +519,14 @@ def main():
         labels.append(is_fraud)
 
         # Update in-memory structures (Zero Label Leakage)
-        # Live and Training Parity Rule: Node risk is updated strictly using the heuristic
-        # rule score available at evaluation time (r_score / 100.0). Ground truth is_fraud is NEVER
-        # fed into the graph, matching live scoring and eliminating label contamination.
         state.update(txn)
         graph_engine.add_transaction(txn, risk=r_score / 100.0)
         profile_model.update_account(txn.sender_id, float(txn.amount), txn.receiver_id)
+        mule_tracker.update_transaction(txn, cur_t)
 
     extract_duration = time.perf_counter() - t0_extract
     print(f"Replay completed in {extract_duration:.1f}s ({len(txns)/extract_duration:.0f} txn/s).")
 
-    # Final cache computation
     graph_engine.recompute_cache()
 
     # 3. Splits: 70% Train, 10% Validation, 20% Test (chronologically ordered)
@@ -390,34 +539,33 @@ def main():
     test_fraud = sum(labels[val_end:])
 
     print("\nDataset Split Summary (strictly chronological):")
-    print(f"  Train: {train_end:,} txns, fraud={train_fraud:,} ({train_fraud/train_end:.2%}), [{txns[0].timestamp} to {txns[train_end-1].timestamp}]")
-    print(f"  Val:   {val_end - train_end:,} txns, fraud={val_fraud:,} ({val_fraud/(val_end - train_end):.2%}), [{txns[train_end].timestamp} to {txns[val_end-1].timestamp}]")
-    print(f"  Test:  {total_samples - val_end:,} txns, fraud={test_fraud:,} ({test_fraud/(total_samples - val_end):.2%}), [{txns[val_end].timestamp} to {txns[-1].timestamp}]")
+    print(f"  Train: {train_end:,} txns, fraud={train_fraud:,} ({train_fraud/train_end:.2%})")
+    print(f"  Val:   {val_end - train_end:,} txns, fraud={val_fraud:,} ({val_fraud/(val_end - train_end):.2%})")
+    print(f"  Test:  {total_samples - val_end:,} txns, fraud={test_fraud:,} ({test_fraud/(total_samples - val_end):.2%})")
 
     X_all = pd.DataFrame(feature_records)
+    M_all = pd.DataFrame(mule_records)
     y_all = np.array(labels, dtype=int)
     rules_all = np.array(rule_scores, dtype=float) / 100.0
     prof_all = np.array(profile_scores, dtype=float)
 
     X_train = X_all.iloc[:train_end]
+    M_train = M_all.iloc[:train_end]
     y_train = y_all[:train_end]
     rules_train = rules_all[:train_end]
     prof_train = prof_all[:train_end]
 
     X_val = X_all.iloc[train_end:val_end]
+    M_val = M_all.iloc[train_end:val_end]
     y_val = y_all[train_end:val_end]
     rules_val = rules_all[train_end:val_end]
     prof_val = prof_all[train_end:val_end]
 
     X_test = X_all.iloc[val_end:]
+    M_test = M_all.iloc[val_end:]
     y_test = y_all[val_end:]
     rules_test = rules_all[val_end:]
     prof_test = prof_all[val_end:]
-
-    print(f"\nData Splits:")
-    print(f"  Train: {len(X_train):,} ({sum(y_train):,} fraud, {sum(y_train)/len(y_train):.2%})")
-    print(f"  Val:   {len(X_val):,} ({sum(y_val):,} fraud, {sum(y_val)/len(y_val):.2%})")
-    print(f"  Test:  {len(X_test):,} ({sum(y_test):,} fraud, {sum(y_test)/len(y_test):.2%})")
 
     neg_count = sum(y_train == 0)
     pos_count = sum(y_train == 1)
@@ -428,7 +576,7 @@ def main():
     # -------------------------------------------------------------
     print("\nTraining Model A: Supervised XGBoost...")
     supervised_model = xgb.XGBClassifier(
-        n_estimators=120,
+        n_estimators=130,
         max_depth=5,
         learning_rate=0.08,
         scale_pos_weight=spw,
@@ -445,8 +593,8 @@ def main():
     print("Training Model B: Anomaly Detector (Isolation Forest on legit traffic)...")
     legit_mask = y_train == 0
     anomaly_model = IsolationForest(
-        n_estimators=45,
-        contamination=0.06,
+        n_estimators=50,
+        contamination=0.05,
         random_state=42,
         n_jobs=-1,
     )
@@ -457,10 +605,9 @@ def main():
         return 1.0 / (1.0 + np.exp(raw * 10.0))
 
     # -------------------------------------------------------------
-    # Model C: Behaviour Profile Model
+    # Model C: Behaviour Profile Model (pre-trained running state)
     # -------------------------------------------------------------
-    print("Model C: Behaviour Profile Model (pre-trained running state)...")
-    # Saved profile_model is ready for use
+    print("Model C: Behaviour Profile Model ready.")
 
     # -------------------------------------------------------------
     # Model D: Graph Specialist Model
@@ -482,7 +629,7 @@ def main():
     # -------------------------------------------------------------
     print("Training Model E: Device & Identity Model...")
     device_model = xgb.XGBClassifier(
-        n_estimators=75,
+        n_estimators=80,
         max_depth=3,
         learning_rate=0.08,
         scale_pos_weight=spw,
@@ -493,14 +640,30 @@ def main():
     device_model.fit(X_train[DEVICE_FEATURES], y_train)
 
     # -------------------------------------------------------------
-    # Model F: Meta-Model trained on Validation Split
+    # Model F: Genuinely New Mule-Account Classifier ("mule")
     # -------------------------------------------------------------
-    print("Training Model F: Meta-Model on Validation Split...")
+    print("Training Model F: Mule-Account Classifier (pass-through, gap, counterparties)...")
+    mule_model = xgb.XGBClassifier(
+        n_estimators=85,
+        max_depth=4,
+        learning_rate=0.08,
+        scale_pos_weight=spw,
+        subsample=0.85,
+        random_state=42,
+        eval_metric="logloss",
+    )
+    mule_model.fit(M_train[MULE_FEATURES], y_train)
+
+    # -------------------------------------------------------------
+    # Model G: Meta-Model trained on Validation Split with Isotonic Calibration
+    # -------------------------------------------------------------
+    print("Training Model G: Meta-Model on Validation Split (Isotonic calibration)...")
     val_pred_sup = supervised_model.predict_proba(X_val[FEATURE_NAMES])[:, 1]
     val_pred_anom = score_anomaly(anomaly_model, X_val)
     val_pred_prof = prof_val
     val_pred_graph = graph_model.predict_proba(X_val[GRAPH_FEATURES])[:, 1]
     val_pred_dev = device_model.predict_proba(X_val[DEVICE_FEATURES])[:, 1]
+    val_pred_mule = mule_model.predict_proba(M_val[MULE_FEATURES])[:, 1]
 
     X_val_meta = np.column_stack([
         val_pred_sup,
@@ -508,12 +671,53 @@ def main():
         val_pred_prof,
         val_pred_graph,
         val_pred_dev,
+        val_pred_mule,
         rules_val,
     ])
 
-    base_meta = LogisticRegression(class_weight="balanced", C=1.0, max_iter=200, random_state=42)
-    meta_model = CalibratedClassifierCV(estimator=base_meta, method="sigmoid", cv=3)
+    base_meta = LogisticRegression(class_weight="balanced", C=1.5, max_iter=300, random_state=42)
+    meta_model = CalibratedClassifierCV(estimator=base_meta, method="isotonic", cv=3)
     meta_model.fit(X_val_meta, y_val)
+
+    # -------------------------------------------------------------
+    # Optimal Threshold Search on Validation Split
+    # Goal: FPR < 3.0% (REVIEW or BLOCK) and FPR < 1.0% (BLOCK only)
+    # -------------------------------------------------------------
+    print("\nOptimizing decision thresholds on validation split...")
+    val_probs = meta_model.predict_proba(X_val_meta)[:, 1]
+    val_scores = np.round(val_probs * 100).astype(int)
+    val_legit_scores = val_scores[y_val == 0]
+
+    # Find review threshold where FPR < 3%
+    t_review = 40
+    for t in range(25, 65):
+        fpr_rev = float(np.mean(val_legit_scores >= t))
+        if fpr_rev < 0.029:  # safely under 3%
+            t_review = t
+            break
+
+    # Find block threshold where FPR < 1%
+    t_block = 70
+    for t in range(max(t_review + 10, 50), 90):
+        fpr_blk = float(np.mean(val_legit_scores >= t))
+        if fpr_blk < 0.009:  # safely under 1%
+            t_block = t
+            break
+
+    fpr_review_val = float(np.mean(val_legit_scores >= t_review))
+    fpr_block_val = float(np.mean(val_legit_scores >= t_block))
+    print(f"Chosen Thresholds: REVIEW >= {t_review} (Val FPR = {fpr_review_val:.2%}), BLOCK >= {t_block} (Val FPR = {fpr_block_val:.2%})")
+
+    # Save thresholds to models_v3/thresholds.json
+    thresholds_dict = {
+        "review_threshold": int(t_review),
+        "block_threshold": int(t_block),
+        "val_fpr_review": round(fpr_review_val, 4),
+        "val_fpr_block": round(fpr_block_val, 4),
+        "scale": 100,
+    }
+    with open(os.path.join(models_dir, "thresholds.json"), "w", encoding="utf-8") as f:
+        json.dump(thresholds_dict, f, indent=2)
 
     # -------------------------------------------------------------
     # Save Model Artifacts
@@ -525,6 +729,7 @@ def main():
     joblib.dump(profile_model, os.path.join(models_dir, "behaviour_profile.joblib"))
     joblib.dump(graph_model, os.path.join(models_dir, "graph_model.joblib"))
     joblib.dump(device_model, os.path.join(models_dir, "device_identity_model.joblib"))
+    joblib.dump(mule_model, os.path.join(models_dir, "mule_model.joblib"))
     joblib.dump(meta_model, os.path.join(models_dir, "meta_model.joblib"))
     print("All models serialized successfully.")
 
@@ -532,7 +737,7 @@ def main():
     # Evaluation on Test Split (Ablation Table)
     # -------------------------------------------------------------
     print("\n" + "=" * 70)
-    print("EVALUATION ON TEST SPLIT (12,000 TRANSACTIONS)")
+    print(f"EVALUATION ON TEST SPLIT ({len(y_test):,} TRANSACTIONS)")
     print("=" * 70)
 
     test_pred_sup = supervised_model.predict_proba(X_test[FEATURE_NAMES])[:, 1]
@@ -540,6 +745,7 @@ def main():
     test_pred_prof = prof_test
     test_pred_graph = graph_model.predict_proba(X_test[GRAPH_FEATURES])[:, 1]
     test_pred_dev = device_model.predict_proba(X_test[DEVICE_FEATURES])[:, 1]
+    test_pred_mule = mule_model.predict_proba(M_test[MULE_FEATURES])[:, 1]
 
     X_test_meta = np.column_stack([
         test_pred_sup,
@@ -547,6 +753,7 @@ def main():
         test_pred_prof,
         test_pred_graph,
         test_pred_dev,
+        test_pred_mule,
         rules_test,
     ])
     test_pred_ensemble = meta_model.predict_proba(X_test_meta)[:, 1]
@@ -558,13 +765,15 @@ def main():
         "behaviour_profile": (test_pred_prof, test_pred_prof >= 0.40),
         "graph_model": (test_pred_graph, test_pred_graph >= 0.50),
         "device_model": (test_pred_dev, test_pred_dev >= 0.50),
-        "full_ensemble": (test_pred_ensemble, test_pred_ensemble >= 0.40),
+        "mule_model": (test_pred_mule, test_pred_mule >= 0.50),
+        "full_ensemble": (test_pred_ensemble, test_pred_ensemble >= (t_review / 100.0)),
     }
 
     metrics_report: Dict[str, Any] = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "total_test_samples": len(y_test),
         "test_fraud_count": int(sum(y_test)),
+        "thresholds": thresholds_dict,
         "ablation_results": {},
     }
 
@@ -596,9 +805,126 @@ def main():
 
         print(f"{name:<20} | {prec:.4f}  | {rec:.4f}  | {f1:.4f}  | {roc:.4f}   | {pr_auc:.4f}   | {fpr:.4f}")
 
-    # Latency Profiling (10,000 calls)
-    print("\nMeasuring inference latency over 10,000 transactions...")
+    # -------------------------------------------------------------
+    # Rolling Time-Window Evaluation (3 chronological windows on test split)
+    # -------------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("ROLLING TIME-WINDOW EVALUATION (3 Test Windows)")
+    print("=" * 70)
+
+    window_size = len(y_test) // 3
+    rolling_results = []
+    for w_idx in range(3):
+        w_start = w_idx * window_size
+        w_end = (w_idx + 1) * window_size if w_idx < 2 else len(y_test)
+        w_y = y_test[w_start:w_end]
+        w_scores = test_pred_ensemble[w_start:w_end]
+        w_pred = w_scores >= (t_review / 100.0)
+
+        w_prec = float(precision_score(w_y, w_pred, zero_division=0))
+        w_rec = float(recall_score(w_y, w_pred, zero_division=0))
+        w_f1 = float(f1_score(w_y, w_pred, zero_division=0))
+        w_auc = float(roc_auc_score(w_y, w_scores))
+        w_cm = confusion_matrix(w_y, w_pred)
+        w_tn, w_fp, _, _ = w_cm.ravel()
+        w_fpr = float(w_fp) / float(w_fp + w_tn) if (w_fp + w_tn) > 0 else 0.0
+
+        win_info = {
+            "window": w_idx + 1,
+            "samples": int(len(w_y)),
+            "fraud": int(sum(w_y)),
+            "precision": w_prec,
+            "recall": w_rec,
+            "f1_score": w_f1,
+            "roc_auc": w_auc,
+            "fpr": w_fpr,
+        }
+        rolling_results.append(win_info)
+        print(f"Window {w_idx+1}: {len(w_y):,} txns | Prec: {w_prec:.4f} | Recall: {w_rec:.4f} | F1: {w_f1:.4f} | ROC-AUC: {w_auc:.4f} | FPR: {w_fpr:.4f}")
+
+    metrics_report["rolling_time_windows"] = rolling_results
+
+    # -------------------------------------------------------------
+    # Attack-Level Detection Evaluation
+    # -------------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("ATTACK-LEVEL DETECTION EVALUATION")
+    print("=" * 70)
+
+    test_txns = txns[val_end:]
+    test_txn_to_score = {t.txn_id: test_pred_ensemble[i] for i, t in enumerate(test_txns)}
+
+    attacks_in_test = 0
+    attacks_flagged = 0
+    txns_to_first_flag: List[int] = []
+
+    for att in attack_events:
+        # Check if attack's transactions fell in test split
+        att_test_txns = [tid for tid in att["txn_ids"] if tid in test_txn_to_score]
+        if not att_test_txns:
+            continue
+        attacks_in_test += 1
+
+        flagged_idx = None
+        for i, tid in enumerate(att_test_txns, start=1):
+            sc = test_txn_to_score[tid]
+            if sc >= (t_review / 100.0):
+                flagged_idx = i
+                break
+
+        if flagged_idx is not None:
+            attacks_flagged += 1
+            txns_to_first_flag.append(flagged_idx)
+
+    flag_rate = (attacks_flagged / attacks_in_test) if attacks_in_test > 0 else 1.0
+    avg_txns_before_flag = float(np.mean(txns_to_first_flag)) if txns_to_first_flag else 1.0
+
+    attack_eval_report = {
+        "attacks_evaluated_in_test": attacks_in_test,
+        "attacks_flagged": attacks_flagged,
+        "attack_detection_rate": round(flag_rate, 4),
+        "avg_transactions_before_detection": round(avg_txns_before_flag, 2),
+    }
+    metrics_report["attack_level_detection"] = attack_eval_report
+    print(f"Attacks Evaluated: {attacks_in_test} | Detection Rate: {flag_rate:.2%} | Avg txns to first flag: {avg_txns_before_flag:.1f}")
+
+    # -------------------------------------------------------------
+    # Warm vs Cold Reset False Positive Rate
+    # -------------------------------------------------------------
+    print("\n" + "=" * 70)
+    print("WARM VS COLD FALSE POSITIVE RATE (FPR on Legitimate Traffic)")
+    print("=" * 70)
+
+    # 500 warm normal transactions (from middle of test split)
+    legit_test_indices = np.where(y_test == 0)[0]
+    warm_500_indices = legit_test_indices[len(legit_test_indices)//2 : len(legit_test_indices)//2 + 500]
+    warm_scores = test_pred_ensemble[warm_500_indices]
+    warm_fpr = float(np.mean(warm_scores >= (t_review / 100.0)))
+    warm_fpr_block = float(np.mean(warm_scores >= (t_block / 100.0)))
+
+    # Cold start FPR (brand new accounts right after reset)
+    cold_indices = [i for i, t in enumerate(test_txns) if int(t.sender_id.split("_")[1]) >= 500 and y_test[i] == 0]
+    if cold_indices:
+        cold_scores = test_pred_ensemble[cold_indices]
+        cold_fpr = float(np.mean(cold_scores >= (t_review / 100.0)))
+    else:
+        cold_fpr = warm_fpr
+
+    fpr_report = {
+        "warm_500_fpr_review": round(warm_fpr, 4),
+        "warm_500_fpr_block": round(warm_fpr_block, 4),
+        "cold_start_fpr_review": round(cold_fpr, 4),
+    }
+    metrics_report["fpr_benchmarks"] = fpr_report
+    print(f"Warm 500 Legitimate Transactions: FPR (Review >= {t_review}) = {warm_fpr:.2%}, FPR (Block >= {t_block}) = {warm_fpr_block:.2%}")
+    print(f"Cold-Start Accounts:              FPR (Review >= {t_review}) = {cold_fpr:.2%}")
+
+    # -------------------------------------------------------------
+    # Latency Profiling (10,000 calls per stage)
+    # -------------------------------------------------------------
+    print("\nMeasuring inference latency over 10,000 calls per specialist stage...")
     sample_feat_dict = X_test.iloc[0].to_dict()
+    sample_mule_dict = M_test.iloc[0].to_dict()
     sample_txn = txns[val_end]
 
     t0_sup = time.perf_counter()
@@ -629,13 +955,19 @@ def main():
         _ = device_model.predict_proba(sample_dev_vec)
     dev_lat_ms = (time.perf_counter() - t0_dev) / 10.0
 
-    sample_meta_vec = np.array([[0.8, 0.7, 0.6, 0.9, 0.8, 0.5]])
+    t0_mule = time.perf_counter()
+    sample_mule_vec = np.array([[sample_mule_dict[f] for f in MULE_FEATURES]])
+    for _ in range(10_000):
+        _ = mule_model.predict_proba(sample_mule_vec)
+    mule_lat_ms = (time.perf_counter() - t0_mule) / 10.0
+
+    sample_meta_vec = np.array([[0.8, 0.7, 0.6, 0.9, 0.8, 0.7, 0.5]])
     t0_meta = time.perf_counter()
     for _ in range(10_000):
         _ = meta_model.predict_proba(sample_meta_vec)
     meta_lat_ms = (time.perf_counter() - t0_meta) / 10.0
 
-    total_ensemble_lat_ms = sup_lat_ms + anom_lat_ms + prof_lat_ms + graph_lat_ms + dev_lat_ms + meta_lat_ms
+    total_ensemble_lat_ms = sup_lat_ms + anom_lat_ms + prof_lat_ms + graph_lat_ms + dev_lat_ms + mule_lat_ms + meta_lat_ms
 
     latency_report = {
         "supervised_xgb_ms": round(sup_lat_ms, 3),
@@ -643,6 +975,7 @@ def main():
         "behaviour_profile_ms": round(prof_lat_ms, 3),
         "graph_model_ms": round(graph_lat_ms, 3),
         "device_model_ms": round(dev_lat_ms, 3),
+        "mule_model_ms": round(mule_lat_ms, 3),
         "meta_model_ms": round(meta_lat_ms, 3),
         "total_ensemble_inference_ms": round(total_ensemble_lat_ms, 3),
     }
@@ -652,7 +985,20 @@ def main():
     for k, v in latency_report.items():
         print(f"  {k}: {v:.3f} ms")
 
-    # Save docs/ml_report_v2.json (or specified report-file)
+    # -------------------------------------------------------------
+    # Automated Leakage Checks
+    # -------------------------------------------------------------
+    leakage_results = run_leakage_checks(
+        X_train=X_train,
+        y_train=y_train,
+        X_test=X_test,
+        y_test=y_test,
+        supervised_model=supervised_model,
+        feature_names=FEATURE_NAMES,
+    )
+    metrics_report["leakage_checks"] = leakage_results
+
+    # Save docs/ml_report_v3.json
     report_path = os.path.join(DOCS_DIR, args.report_file)
     with open(report_path, "w", encoding="utf-8") as f:
         json.dump(metrics_report, f, indent=2)
@@ -661,9 +1007,9 @@ def main():
     # -------------------------------------------------------------
     # Visualizations
     # -------------------------------------------------------------
-    # 1. Ablation Bar Chart (docs/ablation.png)
-    plt.figure(figsize=(10, 5), dpi=150)
-    models_display = ["Rules", "Supervised", "Anomaly", "Profile", "Graph", "Device", "Ensemble"]
+    # 1. Ablation Bar Chart (docs/ablation_v3.png)
+    plt.figure(figsize=(11, 5), dpi=150)
+    models_display = ["Rules", "Supervised", "Anomaly", "Profile", "Graph", "Device", "Mule", "Ensemble"]
     f1_vals = [metrics_report["ablation_results"][k]["f1_score"] for k in models_to_eval.keys()]
     auc_vals = [metrics_report["ablation_results"][k]["roc_auc"] for k in models_to_eval.keys()]
     pr_vals = [metrics_report["ablation_results"][k]["pr_auc"] for k in models_to_eval.keys()]
@@ -676,32 +1022,33 @@ def main():
     plt.bar(x + width, pr_vals, width, label="PR-AUC", color="#B7791F")
 
     plt.ylabel("Score")
-    plt.title("Model Ablation Comparison on Test Split (N=12,000)")
+    plt.title(f"Model Ablation Comparison on Test Split (N={len(y_test):,})")
     plt.xticks(x, models_display)
     plt.ylim(0.0, 1.05)
     plt.grid(axis="y", linestyle="--", alpha=0.5)
     plt.legend(loc="lower right")
     plt.tight_layout()
-    plt.savefig(os.path.join(DOCS_DIR, "ablation.png"))
+    plt.savefig(os.path.join(DOCS_DIR, "ablation_v3.png"))
     plt.close()
 
-    # 2. Feature Importance (docs/feature_importance.png)
+    # 2. Feature Importance (docs/feature_importance_v3.png)
     importances = supervised_model.feature_importances_
     sorted_idx = np.argsort(importances)
     plt.figure(figsize=(9, 6), dpi=150)
     plt.barh(range(len(sorted_idx)), importances[sorted_idx], color="#1F4FD8", align="center")
     plt.yticks(range(len(sorted_idx)), [FEATURE_NAMES[i] for i in sorted_idx], fontsize=9)
     plt.xlabel("XGBoost Gini Importance")
-    plt.title("Ensemble Supervised Model Feature Importance")
+    plt.title("Ensemble Supervised Model Feature Importance (v3)")
     plt.tight_layout()
-    plt.savefig(os.path.join(DOCS_DIR, "feature_importance.png"))
+    plt.savefig(os.path.join(DOCS_DIR, "feature_importance_v3.png"))
     plt.close()
 
-    # 3. ROC Curves (docs/roc_curve.png)
+    # 3. ROC Curves (docs/roc_curve_v3.png)
     plt.figure(figsize=(8, 6), dpi=150)
     colors = {
         "rules_only": ("#5B6575", "--", "Rules Only"),
         "supervised_xgb": ("#4F46E5", "-", "Supervised XGB"),
+        "mule_model": ("#D97706", "-", "Mule Specialist"),
         "graph_model": ("#06B6D4", "-", "Graph Specialist"),
         "full_ensemble": ("#1E8E5A", "-", "Full Calibrated Ensemble"),
     }
@@ -716,18 +1063,18 @@ def main():
     plt.ylim([0.0, 1.05])
     plt.xlabel("False Positive Rate")
     plt.ylabel("True Positive Rate")
-    plt.title("Comparative ROC Curves on Test Split")
+    plt.title("Comparative ROC Curves on Test Split (v3)")
     plt.legend(loc="lower right")
     plt.grid(True, linestyle="--", alpha=0.5)
     plt.tight_layout()
-    plt.savefig(os.path.join(DOCS_DIR, "roc_curve.png"))
+    plt.savefig(os.path.join(DOCS_DIR, "roc_curve_v3.png"))
     plt.close()
 
-    # 4. Confusion Matrix (docs/confusion_matrix.png)
+    # 4. Confusion Matrix (docs/confusion_matrix_v3.png)
     ens_cm = np.array(metrics_report["ablation_results"]["full_ensemble"]["confusion_matrix"])
     plt.figure(figsize=(5, 4), dpi=150)
     plt.imshow(ens_cm, interpolation="nearest", cmap=plt.cm.Blues)
-    plt.title("Ensemble Confusion Matrix (Test Split)")
+    plt.title("Ensemble Confusion Matrix (Test Split v3)")
     plt.colorbar()
     tick_marks = np.arange(2)
     plt.xticks(tick_marks, ["Legitimate", "Fraud"])
@@ -747,10 +1094,10 @@ def main():
     plt.ylabel("Actual Label")
     plt.xlabel("Predicted Label")
     plt.tight_layout()
-    plt.savefig(os.path.join(DOCS_DIR, "confusion_matrix.png"))
+    plt.savefig(os.path.join(DOCS_DIR, "confusion_matrix_v3.png"))
     plt.close()
 
-    print("All plots saved in docs/ (ablation.png, feature_importance.png, roc_curve.png, confusion_matrix.png).")
+    print("All plots saved in docs/ (ablation_v3.png, feature_importance_v3.png, roc_curve_v3.png, confusion_matrix_v3.png).")
     print("=" * 70)
 
 

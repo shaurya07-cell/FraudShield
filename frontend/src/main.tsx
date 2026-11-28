@@ -14,12 +14,7 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
   const registerSW = () => {
     navigator.serviceWorker
       .register('/sw.js', { scope: '/' })
-      .then((reg) => {
-        console.log('[SW] Registered, scope:', reg.scope);
-      })
-      .catch((err) => {
-        console.warn('[SW] Registration failed:', err);
-      });
+      .catch(() => {});
   };
 
   if (document.readyState === 'complete') {

@@ -66,17 +66,10 @@ export const LatencyChart: React.FC<LatencyChartProps> = ({ data, currentAvg }) 
                   return null;
                 }}
               />
-              {/* Reference line at 100 ms SLA limit - amber dashed */}
               <ReferenceLine
                 y={100}
                 stroke="#B7791F"
                 strokeDasharray="4 4"
-                label={{
-                  value: 'Limit 100 ms',
-                  position: 'insideTopRight',
-                  fill: '#B7791F',
-                  fontSize: 10,
-                }}
               />
               <Line
                 type="monotone"

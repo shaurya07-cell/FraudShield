@@ -61,7 +61,7 @@ export const MetricsStrip: React.FC<MetricsStripProps> = ({ metrics }) => {
           <div className="text-[24px] font-semibold text-[#1B2433] font-mono tabular-nums leading-tight my-1">
             {metrics.avg_latency_ms.toFixed(1)} <span className="text-[14px] font-normal text-[#8A94A6]">ms</span>
           </div>
-          <div className="text-[11px] text-[#8A94A6]">limit 100 ms</div>
+          <div className="text-[11px] h-[16px]" aria-hidden="true" />
         </div>
 
         {/* 3. p99 latency */}
@@ -70,7 +70,7 @@ export const MetricsStrip: React.FC<MetricsStripProps> = ({ metrics }) => {
           <div className="text-[24px] font-semibold text-[#1B2433] font-mono tabular-nums leading-tight my-1">
             {metrics.p99_latency_ms.toFixed(1)} <span className="text-[14px] font-normal text-[#8A94A6]">ms</span>
           </div>
-          <div className="text-[11px] text-[#8A94A6]">limit 100 ms</div>
+          <div className="text-[11px] h-[16px]" aria-hidden="true" />
         </div>
 
         {/* 4. Throughput (txn/s) */}
@@ -79,7 +79,7 @@ export const MetricsStrip: React.FC<MetricsStripProps> = ({ metrics }) => {
           <div className="text-[24px] font-semibold text-[#1B2433] font-mono tabular-nums leading-tight my-1">
             {metrics.tps === 0 ? '0' : metrics.tps.toFixed(1)} <span className="text-[14px] font-normal text-[#8A94A6]">txn/s</span>
           </div>
-          <div className="text-[11px] text-[#8A94A6]">last 10 s</div>
+          <div className="text-[11px] h-[16px]" aria-hidden="true" />
         </div>
 
         {/* 5. Allowed */}

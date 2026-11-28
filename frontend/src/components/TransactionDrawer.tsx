@@ -123,6 +123,34 @@ export const TransactionDrawer: React.FC<TransactionDrawerProps> = ({ transactio
             )}
           </div>
 
+          {/* Per-model scores */}
+          {transaction.model_scores && Object.keys(transaction.model_scores).length > 0 && (
+            <div className="py-4 border-b border-[#DCE0E7]">
+              <h3 className="text-[14px] font-medium text-[#1B2433] mb-2.5">Model breakdown</h3>
+              <div className="space-y-2">
+                {Object.entries(transaction.model_scores).map(([model, score]) => {
+                  const pct = Math.min(100, Math.max(0, score * 100));
+                  return (
+                    <div key={model} className="text-[12px]">
+                      <div className="flex justify-between items-center mb-1">
+                        <span className="font-mono text-[#5B6575] capitalize">{model}</span>
+                        <span className="font-mono tabular-nums text-[#1B2433] font-medium">
+                          {(score * 100).toFixed(0)}%
+                        </span>
+                      </div>
+                      <div className="w-full h-1.5 bg-[#E3E7EE] rounded-full overflow-hidden">
+                        <div
+                          className="h-full bg-[#1F4FD8] rounded-full"
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Risk reasons */}
           <div className="py-4">
             <h3 className="text-[14px] font-medium text-[#1B2433] mb-3">Evaluated risk factors</h3>

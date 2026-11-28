@@ -107,12 +107,64 @@ def test_ensemble_score_transaction_contract():
     assert 0 <= final_score <= 100
 
     assert isinstance(model_scores, dict)
-    expected_keys = {"supervised", "anomaly", "profile", "graph", "device", "meta"}
+    expected_keys = {"supervised", "anomaly", "profile", "graph", "device", "mule", "meta"}
     for k in expected_keys:
         assert k in model_scores
         assert 0.0 <= model_scores[k] <= 1.0
 
     assert isinstance(reasons, list)
+
+
+def test_mule_tracker_online_feature_extraction():
+    """Verify MuleAccountTracker calculates pass-through and turnover features."""
+    from app.models_ensemble import MuleAccountTracker
+    tracker = MuleAccountTracker()
+
+    # Step 1: Account ACC_MULE receives 5,000 at t=100
+    t_in = Transaction(
+        txn_id="TXN_IN_1",
+        timestamp="2026-11-20T10:00:00Z",
+        sender_id="ACC_0001",
+        receiver_id="ACC_MULE",
+        amount=5000.0,
+        device_id="DEV_1",
+        ip="192.168.1.1",
+        channel="UPI",
+    )
+    tracker.update_transaction(t_in, current_time=100.0)
+
+    # Step 2: Account ACC_MULE sends 4,800 to ACC_AGG at t=160 (60s gap)
+    t_out = Transaction(
+        txn_id="TXN_OUT_1",
+        timestamp="2026-11-20T10:01:00Z",
+        sender_id="ACC_MULE",
+        receiver_id="ACC_AGG",
+        amount=4800.0,
+        device_id="DEV_MULE",
+        ip="192.168.1.2",
+        channel="UPI",
+    )
+    mule_feats = tracker.extract_mule_features(
+        account_id="ACC_MULE",
+        amount=4800.0,
+        current_time=160.0,
+    )
+
+    assert mule_feats["pass_through_ratio"] >= 0.90
+    assert mule_feats["avg_gap_seconds"] <= 120.0
+    assert mule_feats["distinct_counterparties"] >= 1.0
+    assert mule_feats["round_amount_share"] > 0.0
+
+
+def test_threshold_loading_from_json(tmp_path):
+    """Verify FraudEnsemble parses thresholds.json from the active models directory."""
+    import json
+    thresh_file = tmp_path / "thresholds.json"
+    thresh_file.write_text(json.dumps({"review_threshold": 42, "block_threshold": 77}))
+
+    ens = FraudEnsemble(models_dir=str(tmp_path))
+    assert ens.thresholds["review"] == 42
+    assert ens.thresholds["block"] == 77
 
 
 def test_scorer_integration_with_ensemble():

@@ -17,6 +17,7 @@ export interface ScoredTransaction {
   reasons: Reason[];
   ring_id: string | null;
   latency_ms: number;
+  model_scores?: Record<string, number> | null;
   isNew?: boolean;
 }
 

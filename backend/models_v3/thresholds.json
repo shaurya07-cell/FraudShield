@@ -1,0 +1,7 @@
+{
+  "review_threshold": 25,
+  "block_threshold": 50,
+  "val_fpr_review": 0.0024,
+  "val_fpr_block": 0.0017,
+  "scale": 100
+}
