@@ -71,8 +71,27 @@ class ResolvePayeeResponse(BaseModel):
     display_name: Optional[str] = None
     account_id: Optional[str] = None
     vpa: Optional[str] = None
-    phone: Optional[str] = None
+    phone: Optional[str] = None      # always masked (xxxxxx1234) if present
     bank_name: Optional[str] = None
+    verification: Optional[str] = None  # "simulated_registry"|"self_declared"|"format_only"
+    linked_handle: Optional[str] = None
+    masked_phone: Optional[str] = None  # same as phone, exposed explicitly
+
+
+class RegisterHandleRequest(BaseModel):
+    display_name: str
+    upi_id: Optional[str] = None
+    phone: Optional[str] = None
+    account_id: Optional[str] = None
+
+
+class RegisterHandleResponse(BaseModel):
+    registered: bool
+    display_name: str
+    upi_id: Optional[str] = None
+    masked_phone: Optional[str] = None
+    account_id: Optional[str] = None
+    message: str
 
 
 class GatewayPaymentRecord(BaseModel):
@@ -131,9 +150,7 @@ COMMON_PSPS = {
     "mobikwik": "MobiKwik UPI",
 }
 
-KNOWN_NAMES_BY_PHONE = {
-    "8708834739": "Shaurya Sharma",
-}
+KNOWN_NAMES_BY_PHONE: Dict[str, str] = {}  # no real identifiers in code
 
 
 def normalize_phone_number(raw: str) -> Optional[str]:
@@ -177,7 +194,12 @@ def name_from_handle(prefix: str) -> str:
     return " ".join(words) if words else "Verified Receiver"
 
 
-def name_from_phone(phone: str) -> str:
+def mask_phone(phone: str) -> str:
+    """Mask all but last 4 digits of phone number."""
+    return "xxxxxx" + phone[-4:] if len(phone) >= 4 else "xxxxxx"
+
+
+
     """Deterministically map a 10-digit phone number to a realistic Indian name."""
     if phone in KNOWN_NAMES_BY_PHONE:
         return KNOWN_NAMES_BY_PHONE[phone]
@@ -197,6 +219,9 @@ class GatewayManager:
         self._initial_accounts: Dict[str, GatewayAccount] = {}
         self._vpa_map: Dict[str, str] = {}
         self._phone_map: Dict[str, str] = {}
+        self._handle_registry: Dict[str, dict] = {}  # keyed by phone or upi_id.lower()
+        self._initial_vpa_map: Dict[str, str] = {}
+        self._initial_phone_map: Dict[str, str] = {}
         self._ledger: List[GatewayPaymentRecord] = []
         self._broadcast_callback: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._seed_accounts()
@@ -231,6 +256,9 @@ class GatewayManager:
 
         self._accounts = {k: v.model_copy() for k, v in accounts.items()}
         self._initial_accounts = {k: v.model_copy() for k, v in accounts.items()}
+        self._initial_vpa_map = dict(self._vpa_map)
+        self._initial_phone_map = dict(self._phone_map)
+        self._handle_registry.clear()
         self._ledger = []
 
     def resolve_handle(self, handle: str) -> ResolvePayeeResponse:
@@ -239,6 +267,7 @@ class GatewayManager:
         if not raw:
             return ResolvePayeeResponse(found=False, handle=handle, kind=None, display_name=None)
 
+        # 0. Razorpay test payee (always found)
         if raw.lower() == "success@razorpay":
             return ResolvePayeeResponse(
                 found=True,
@@ -248,42 +277,55 @@ class GatewayManager:
                 account_id="RZP_TEST_PAYEE",
                 vpa="success@razorpay",
                 bank_name="Razorpay Test Gateway",
+                verification="simulated_registry",
             )
 
-        # 1. Check if input is a phone number (e.g. 8708834739, +91 87088 34739)
+        # 1. Phone number detection
         phone = normalize_phone_number(raw)
         if phone:
+            masked = mask_phone(phone)
             with self._lock:
+                # Check handle_registry first (self-registered)
+                reg = self._handle_registry.get(phone)
+                if reg:
+                    return ResolvePayeeResponse(
+                        found=True,
+                        handle=raw,
+                        kind="phone",
+                        display_name=reg["display_name"],
+                        account_id=reg["account_id"],
+                        verification=reg.get("verification", "simulated_registry"),
+                        phone=masked,
+                        masked_phone=masked,
+                    )
+                # Check seeded phone map
                 target_id = self._phone_map.get(phone)
                 if target_id and target_id in self._accounts:
                     acc = self._accounts[target_id]
-                    display_name = acc.holder_name or acc.name
-                    acc_id = acc.id
-                else:
-                    display_name = name_from_phone(phone)
-                    acc_id = f"ACC_{phone}"
-                    acc = GatewayAccount(id=acc_id, name=display_name, balance=50000.0, status="active", holder_name=display_name)
-                    self._accounts[acc_id] = acc
-                    self._accounts[phone] = acc
-                    self._accounts[f"{phone}@upi"] = acc
-                    self._phone_map[phone] = acc_id
-                    self._vpa_map[f"{phone}@upi"] = acc_id
-
+                    return ResolvePayeeResponse(
+                        found=True,
+                        handle=raw,
+                        kind="phone",
+                        display_name=acc.holder_name or acc.name,
+                        account_id=acc.id,
+                        verification="simulated_registry",
+                        phone=masked,
+                        masked_phone=masked,
+                    )
+            # Phone detected but not registered / not seeded
             return ResolvePayeeResponse(
-                found=True,
+                found=False,
                 handle=raw,
                 kind="phone",
-                display_name=display_name,
-                account_id=acc_id,
-                vpa=f"{phone}@upi",
-                phone=phone,
-                bank_name="Primary Bank Account (UPI linked)",
+                display_name=None,
+                phone=masked,
+                masked_phone=masked,
             )
 
         with self._lock:
-            # 2. Check direct account ID (e.g. ACC_0015)
+            # 2. Direct account ID (e.g. ACC_0015)
             acc = self._accounts.get(raw.upper())
-            if acc:
+            if acc and re.match(r"^ACC_", acc.id, re.IGNORECASE):
                 return ResolvePayeeResponse(
                     found=True,
                     handle=acc.id,
@@ -292,9 +334,10 @@ class GatewayManager:
                     account_id=acc.id,
                     vpa=f"{acc.id.lower()}@upi",
                     bank_name="FraudShield Federal Bank",
+                    verification="simulated_registry",
                 )
 
-        # 3. Check VPA handle (e.g. 8708834739@ptyes or user@okhdfcbank)
+        # 3. VPA handle (contains @)
         if "@" in raw:
             parts = raw.split("@", 1)
             prefix_clean = parts[0].strip()
@@ -304,9 +347,25 @@ class GatewayManager:
                 return ResolvePayeeResponse(found=False, handle=raw, kind=None, display_name=None)
 
             with self._lock:
+                # Check handle_registry (self-registered VPA)
+                reg = self._handle_registry.get(raw.lower())
+                if reg:
+                    mp = mask_phone(reg["phone"]) if reg.get("phone") else None
+                    return ResolvePayeeResponse(
+                        found=True,
+                        handle=raw,
+                        kind="vpa",
+                        display_name=reg["display_name"],
+                        account_id=reg["account_id"],
+                        vpa=raw,
+                        verification=reg.get("verification", "simulated_registry"),
+                        phone=mp,
+                        masked_phone=mp,
+                    )
+
                 # Check seeded account prefix (e.g. acc_0010@upi)
                 acc_by_prefix = self._accounts.get(prefix_clean.upper())
-                if acc_by_prefix:
+                if acc_by_prefix and re.match(r"^ACC_", acc_by_prefix.id, re.IGNORECASE):
                     return ResolvePayeeResponse(
                         found=True,
                         handle=raw,
@@ -315,9 +374,10 @@ class GatewayManager:
                         account_id=acc_by_prefix.id,
                         vpa=raw,
                         bank_name=COMMON_PSPS.get(psp_clean, "FraudShield Federal Bank"),
+                        verification="simulated_registry",
                     )
 
-                # Check mapped VPA
+                # Check mapped VPA (seeded)
                 target_id = self._vpa_map.get(raw.lower())
                 if target_id and target_id in self._accounts:
                     acc_by_vpa = self._accounts[target_id]
@@ -329,72 +389,134 @@ class GatewayManager:
                         account_id=acc_by_vpa.id,
                         vpa=raw,
                         bank_name=COMMON_PSPS.get(psp_clean, "UPI Bank Account"),
+                        verification="simulated_registry",
                     )
 
-            # Check if prefix is a phone number (e.g. 8708834739@ptyes)
+            # Check if prefix is a seeded phone (e.g. 9820000000@upi)
             vpa_phone = normalize_phone_number(prefix_clean)
             if vpa_phone:
-                display_name = name_from_phone(vpa_phone)
-                acc_id = f"ACC_{vpa_phone}"
-                bank_name = COMMON_PSPS.get(psp_clean, f"{psp_clean.upper()} Bank UPI")
+                masked = mask_phone(vpa_phone)
                 with self._lock:
-                    if acc_id not in self._accounts:
-                        acc = GatewayAccount(id=acc_id, name=display_name, balance=50000.0, status="active", holder_name=display_name)
-                        self._accounts[acc_id] = acc
-                        self._accounts[vpa_phone] = acc
-                    else:
-                        acc = self._accounts[acc_id]
-                        display_name = acc.holder_name or acc.name
-
-                    self._accounts[raw] = acc
-                    self._accounts[raw.lower()] = acc
-                    self._vpa_map[raw.lower()] = acc_id
-                    self._phone_map[vpa_phone] = acc_id
-
+                    reg = self._handle_registry.get(vpa_phone)
+                    if reg:
+                        return ResolvePayeeResponse(
+                            found=True,
+                            handle=raw,
+                            kind="vpa",
+                            display_name=reg["display_name"],
+                            account_id=reg["account_id"],
+                            vpa=raw,
+                            verification=reg.get("verification", "simulated_registry"),
+                            phone=masked,
+                            masked_phone=masked,
+                        )
+                    target_id = self._phone_map.get(vpa_phone)
+                    if target_id and target_id in self._accounts:
+                        acc = self._accounts[target_id]
+                        return ResolvePayeeResponse(
+                            found=True,
+                            handle=raw,
+                            kind="vpa",
+                            display_name=acc.holder_name or acc.name,
+                            account_id=acc.id,
+                            vpa=raw,
+                            bank_name=COMMON_PSPS.get(psp_clean, f"{psp_clean.upper()} Bank UPI"),
+                            verification="simulated_registry",
+                            phone=masked,
+                            masked_phone=masked,
+                        )
+                # Phone-prefixed VPA but phone not registered/seeded
                 return ResolvePayeeResponse(
-                    found=True,
+                    found=False,
                     handle=raw,
                     kind="vpa",
-                    display_name=display_name,
-                    account_id=acc_id,
-                    vpa=raw,
-                    phone=vpa_phone,
-                    bank_name=bank_name,
+                    verification="format_only",
+                    phone=masked,
+                    masked_phone=masked,
                 )
 
-            # Valid general UPI format (e.g. shaurya@okhdfcbank)
+            # Valid VPA format but not in registry
             if is_valid_vpa(raw):
-                display_name = name_from_handle(prefix_clean)
-                acc_id = f"VPA_{re.sub(r'[^a-zA-Z0-9]', '_', raw).upper()}"
-                bank_name = COMMON_PSPS.get(psp_clean, f"{psp_clean.upper()} Bank UPI")
-                with self._lock:
-                    if acc_id not in self._accounts:
-                        acc = GatewayAccount(id=acc_id, name=display_name, balance=50000.0, status="active", holder_name=display_name)
-                        self._accounts[acc_id] = acc
-                    else:
-                        acc = self._accounts[acc_id]
-                        display_name = acc.holder_name or acc.name
-
-                    self._accounts[raw] = acc
-                    self._accounts[raw.lower()] = acc
-                    self._vpa_map[raw.lower()] = acc_id
-
                 return ResolvePayeeResponse(
-                    found=True,
+                    found=False,
                     handle=raw,
                     kind="vpa",
-                    display_name=display_name,
-                    account_id=acc_id,
-                    vpa=raw,
-                    bank_name=bank_name,
+                    verification="format_only",
                 )
 
         return ResolvePayeeResponse(found=False, handle=handle, kind=None, display_name=None)
+
+    def register_handle(self, req: "RegisterHandleRequest") -> "RegisterHandleResponse":
+        """Register a UPI ID or phone in the in-memory simulated registry."""
+        upi_id = req.upi_id.strip() if req.upi_id else None
+        raw_phone = req.phone.strip() if req.phone else None
+        phone = normalize_phone_number(raw_phone) if raw_phone else None
+        display_name = (req.display_name or "").strip()
+
+        if not display_name:
+            raise HTTPException(status_code=400, detail="display_name cannot be empty.")
+        if not upi_id and not raw_phone:
+            raise HTTPException(status_code=400, detail="At least one of upi_id or phone is required.")
+        if upi_id and not is_valid_vpa(upi_id):
+            raise HTTPException(status_code=400, detail=f"Invalid UPI ID format '{upi_id}'. Expected name@psp.")
+        if raw_phone and not phone:
+            raise HTTPException(status_code=400, detail="Invalid phone number. Provide a 10-digit Indian mobile number.")
+
+        masked = mask_phone(phone) if phone else None
+
+        with self._lock:
+            account_id = req.account_id
+            if account_id and account_id not in self._accounts:
+                raise HTTPException(status_code=400, detail=f"Account '{account_id}' not found.")
+
+            if not account_id:
+                if phone:
+                    account_id = f"VPA_{phone}"
+                elif upi_id:
+                    account_id = f"VPA_{re.sub(r'[^a-zA-Z0-9]', '_', upi_id).upper()}"
+
+                if account_id and account_id not in self._accounts:
+                    acc = GatewayAccount(
+                        id=account_id, name=display_name,
+                        balance=50000.0, status="active", holder_name=display_name,
+                    )
+                    self._accounts[account_id] = acc
+
+            reg_entry: dict = {
+                "display_name": display_name,
+                "upi_id": upi_id,
+                "phone": phone,
+                "account_id": account_id,
+                "verification": "simulated_registry",
+            }
+
+            if phone:
+                self._handle_registry[phone] = reg_entry
+                self._phone_map[phone] = account_id
+                # Also register vpa alias so payments can route
+                if upi_id:
+                    self._vpa_map[upi_id.lower()] = account_id
+                    self._handle_registry[upi_id.lower()] = reg_entry
+            if upi_id and not phone:
+                self._handle_registry[upi_id.lower()] = reg_entry
+                self._vpa_map[upi_id.lower()] = account_id
+
+        return RegisterHandleResponse(
+            registered=True,
+            display_name=display_name,
+            upi_id=upi_id,
+            masked_phone=masked,
+            account_id=account_id,
+            message="Handle registered in simulated registry. Stored in memory only, cleared on restart.",
+        )
 
     def reset(self) -> None:
         """Restore initial seeded account balances and clear the ledger."""
         with self._lock:
             self._accounts = {k: v.model_copy() for k, v in self._initial_accounts.items()}
+            self._vpa_map = dict(self._initial_vpa_map)
+            self._phone_map = dict(self._initial_phone_map)
+            self._handle_registry.clear()
             self._ledger.clear()
 
     def get_account(self, acc_id: str) -> Optional[GatewayAccount]:
@@ -428,6 +550,7 @@ class GatewayManager:
         amt = round(req.amount, 2)
 
         # 1. Validation (Thread-safe check)
+        receiver_account_id = None
         with self._lock:
             sender = self._accounts.get(req.from_account)
             receiver = (
@@ -449,6 +572,9 @@ class GatewayManager:
                 res = self.resolve_handle(req.to_account)
                 if res.found and res.account_id:
                     receiver = self._accounts.get(res.account_id)
+
+            if receiver:
+                receiver_account_id = receiver.id
 
             validation_error = None
             if not sender:
@@ -543,7 +669,7 @@ class GatewayManager:
         with self._lock:
             # Re-fetch under lock
             sender = self._accounts[req.from_account]
-            receiver = self._accounts[req.to_account]
+            receiver = self._accounts[receiver_account_id]
             status = "FAILED"
             sender_balance_after = sender.balance
             receiver_balance_after = None
@@ -738,6 +864,12 @@ def gateway_confirm(req: GatewayConfirmRequest) -> GatewayConfirmResponse:
 def resolve_payee(handle: str = Query(..., description="Account ID or VPA handle")) -> ResolvePayeeResponse:
     """Resolve an account ID or VPA handle against registered accounts or test handles."""
     return GATEWAY.resolve_handle(handle)
+
+
+@router.post("/register-handle", response_model=RegisterHandleResponse)
+def register_handle(req: RegisterHandleRequest) -> RegisterHandleResponse:
+    """Register a UPI ID or phone number in the simulated registry (in-memory only, cleared on restart)."""
+    return GATEWAY.register_handle(req)
 
 
 @router.get("/accounts/{account_id}", response_model=GatewayAccount)

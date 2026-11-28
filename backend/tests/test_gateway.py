@@ -275,69 +275,149 @@ def test_resolve_unknown_vpa():
     assert data["display_name"] is None
 
 
-def test_resolve_user_original_upi_id():
-    """Verify resolve endpoint detects user's real UPI ID like 8708834739@ptyes."""
-    res = client.get("/gateway/resolve?handle=8708834739@ptyes")
+def test_register_then_resolve_by_upi():
+    """Register a UPI ID then resolve it → found:true, verification:simulated_registry."""
+    client.post("/gateway/register-handle", json={
+        "display_name": "Demo Tester",
+        "upi_id": "demouser@okfakebank",
+    })
+    res = client.get("/gateway/resolve?handle=demouser@okfakebank")
     assert res.status_code == 200
     data = res.json()
     assert data["found"] is True
     assert data["kind"] == "vpa"
-    assert "8708834739" in data["handle"]
-    assert data["phone"] == "8708834739"
-    assert "Paytm" in data["bank_name"] or "YES Bank" in data["bank_name"]
-    assert data["display_name"] is not None
+    assert data["display_name"] == "Demo Tester"
+    assert data["verification"] == "simulated_registry"
 
 
-def test_resolve_phone_number_auto_detect():
-    """Verify typing a 10-digit phone number detects UPI handle and linked account."""
-    res = client.get("/gateway/resolve?handle=8708834739")
+def test_register_then_resolve_by_phone():
+    """Register a phone then resolve as bare number and with +91 prefix."""
+    client.post("/gateway/register-handle", json={
+        "display_name": "Demo Phone User",
+        "phone": "9900001234",
+    })
+    res = client.get("/gateway/resolve?handle=9900001234")
     assert res.status_code == 200
     data = res.json()
     assert data["found"] is True
     assert data["kind"] == "phone"
-    assert data["phone"] == "8708834739"
-    assert data["vpa"] == "8708834739@upi"
-    assert data["account_id"] == "ACC_8708834739"
-    assert data["display_name"] is not None
+    assert data["display_name"] == "Demo Phone User"
+    assert data["verification"] == "simulated_registry"
+    assert data["masked_phone"] == "xxxxxx1234"
+
+    import urllib.parse
+    res2 = client.get(f"/gateway/resolve?handle={urllib.parse.quote('+91 9900001234')}")
+    assert res2.status_code == 200
+    data2 = res2.json()
+    assert data2["found"] is True
+    assert data2["masked_phone"] == "xxxxxx1234"
 
 
-def test_resolve_phone_number_with_country_code():
-    """Verify typing formatted phone number +91 87088 34739 normalizes and resolves."""
-    res = client.get("/gateway/resolve?handle=%2B91%2087088%2034739")
+def test_resolve_unregistered_phone_returns_not_found():
+    """Bare phone not in registry → found:false."""
+    client.post("/reset")  # clear any registrations from prior tests
+    res = client.get("/gateway/resolve?handle=9900000099")
     assert res.status_code == 200
     data = res.json()
-    assert data["found"] is True
+    assert data["found"] is False
     assert data["kind"] == "phone"
-    assert data["phone"] == "8708834739"
 
 
-def test_payment_to_resolved_upi_id_succeeds():
-    """Verify payment sent to user's real UPI ID processes through gateway and moves money."""
+def test_resolve_valid_format_unregistered_vpa_returns_format_only():
+    """Valid VPA format not registered → found:false, verification:format_only."""
+    client.post("/reset")
+    res = client.get("/gateway/resolve?handle=abc@fakepsp")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is False
+    assert data["verification"] == "format_only"
+
+
+def test_register_invalid_phone_returns_400():
+    """Invalid phone number → 400."""
+    res = client.post("/gateway/register-handle", json={
+        "display_name": "Bad Phone",
+        "phone": "12345",
+    })
+    assert res.status_code == 400
+
+
+def test_register_invalid_upi_returns_400():
+    """Invalid UPI ID format → 400."""
+    res = client.post("/gateway/register-handle", json={
+        "display_name": "Bad UPI",
+        "upi_id": "notaupiid",
+    })
+    assert res.status_code == 400
+
+
+def test_register_no_identifier_returns_400():
+    """No upi_id or phone → 400."""
+    res = client.post("/gateway/register-handle", json={
+        "display_name": "No ID",
+    })
+    assert res.status_code == 400
+
+
+def test_reset_clears_registrations():
+    """Register handle, then reset → resolve should return found:false."""
+    client.post("/gateway/register-handle", json={
+        "display_name": "Temp User",
+        "upi_id": "tempuser@okfakebank2",
+    })
+    resolved_before = client.get("/gateway/resolve?handle=tempuser@okfakebank2").json()
+    assert resolved_before["found"] is True
+
+    client.post("/reset")
+    resolved_after = client.get("/gateway/resolve?handle=tempuser@okfakebank2").json()
+    assert resolved_after["found"] is False
+
+
+def test_masked_phone_in_response():
+    """Phone in resolve response is always masked."""
+    client.post("/gateway/register-handle", json={
+        "display_name": "Masked Test",
+        "phone": "9900005678",
+    })
+    res = client.get("/gateway/resolve?handle=9900005678")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["masked_phone"] == "xxxxxx5678"
+    assert "9900005678" not in str(data.get("phone", ""))
+
+
+def test_payment_to_registered_upi_succeeds():
+    """Pay to a registered UPI ID routes to virtual account."""
+    client.post("/reset")
+    client.post("/gateway/register-handle", json={
+        "display_name": "Fake Payee",
+        "upi_id": "fakepayee@okfakebank",
+    })
     sender_init = client.get("/gateway/accounts/ACC_0010").json()["balance"]
-    payload = {
+    res = client.post("/gateway/pay", json={
         "from_account": "ACC_0010",
-        "to_account": "8708834739@ptyes",
+        "to_account": "fakepayee@okfakebank",
         "amount": 750.0,
-        "note": "Payment via custom UPI ID",
-    }
-    res = client.post("/gateway/pay", json=payload)
+        "note": "Test payment to registered UPI",
+    })
     assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "SUCCESS"
-    assert data["sender_balance_after"] == round(sender_init - 750.0, 2)
+    assert res.json()["status"] == "SUCCESS"
+    assert res.json()["sender_balance_after"] == round(sender_init - 750.0, 2)
 
 
-def test_payment_to_phone_number_succeeds():
-    """Verify payment sent to 10-digit phone number processes through gateway."""
+def test_payment_to_registered_phone_succeeds():
+    """Pay to a registered phone number routes to virtual account."""
+    client.post("/reset")
+    client.post("/gateway/register-handle", json={
+        "display_name": "Fake Phone Payee",
+        "phone": "9900009999",
+    })
     sender_init = client.get("/gateway/accounts/ACC_0010").json()["balance"]
-    payload = {
+    res = client.post("/gateway/pay", json={
         "from_account": "ACC_0010",
-        "to_account": "8708834739",
+        "to_account": "9900009999",
         "amount": 500.0,
-        "note": "Payment via mobile number",
-    }
-    res = client.post("/gateway/pay", json=payload)
+    })
     assert res.status_code == 200
-    data = res.json()
-    assert data["status"] == "SUCCESS"
-    assert data["sender_balance_after"] == round(sender_init - 500.0, 2)
+    assert res.json()["status"] == "SUCCESS"
+    assert res.json()["sender_balance_after"] == round(sender_init - 500.0, 2)

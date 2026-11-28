@@ -10,6 +10,7 @@ import {
   fetchRazorpayPayments,
   fetchPaymentReceipt,
   resolvePayee,
+  registerHandle,
   PaymentReceipt,
 } from '../services/api';
 import type {
@@ -137,6 +138,15 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const [resolvedPayee, setResolvedPayee] = useState<ResolvePayeeResponse | null>(null);
   const [isResolving, setIsResolving] = useState<boolean>(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
+
+  // Link handle demo state
+  const [showLinkForm, setShowLinkForm] = useState<boolean>(false);
+  const [linkDisplayName, setLinkDisplayName] = useState<string>('');
+  const [linkUpiId, setLinkUpiId] = useState<string>('');
+  const [linkPhone, setLinkPhone] = useState<string>('');
+  const [isLinking, setIsLinking] = useState<boolean>(false);
+  const [linkError, setLinkError] = useState<string | null>(null);
+  const [linkSuccess, setLinkSuccess] = useState<boolean>(false);
 
   // Results & verification
   const [payResult, setPayResult] = useState<GatewayPayResponse | null>(null);
@@ -266,6 +276,49 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
       setIsResolving(false);
     }
   }, []);
+
+  const detectInputType = (val: string): string | null => {
+    const v = val.trim();
+    if (!v) return null;
+    if (/^[6-9]\d{9}$/.test(v) || /^\+91[\s]?\d{5}[\s]?\d{5}$/.test(v)) return 'Mobile number';
+    if (v.includes('@')) return 'UPI ID';
+    if (/^ACC_/i.test(v)) return 'Account ID';
+    return null;
+  };
+
+  const handleRegisterLink = useCallback(async () => {
+    if (!linkDisplayName.trim()) {
+      setLinkError('Display name is required.');
+      return;
+    }
+    if (!linkUpiId.trim() && !linkPhone.trim()) {
+      setLinkError('At least one of UPI ID or phone is required.');
+      return;
+    }
+    setIsLinking(true);
+    setLinkError(null);
+    setLinkSuccess(false);
+    try {
+      await registerHandle({
+        display_name: linkDisplayName.trim(),
+        upi_id: linkUpiId.trim() || undefined,
+        phone: linkPhone.trim() || undefined,
+      });
+      setLinkSuccess(true);
+      setShowLinkForm(false);
+      setLinkDisplayName('');
+      setLinkUpiId('');
+      setLinkPhone('');
+      const currentHandle = gatewayMode === 'simulated' ? toAccount : rzpPayeeId;
+      if (currentHandle.trim()) {
+        resolveTarget(currentHandle);
+      }
+    } catch (err: any) {
+      setLinkError(err.message || 'Failed to register handle.');
+    } finally {
+      setIsLinking(false);
+    }
+  }, [linkDisplayName, linkUpiId, linkPhone, gatewayMode, toAccount, rzpPayeeId, resolveTarget]);
 
   // Fetch preset contact names from API on mount
   useEffect(() => {
@@ -705,15 +758,22 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
               {/* Form Input for Manual Address */}
               <form onSubmit={handleProceedToAmount} className="space-y-4">
                 <div>
-                  <label htmlFor="payee-id" className="block text-[12px] font-medium text-[#5B6575] mb-1">
-                    Receiver Account ID or UPI ID
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label htmlFor="payee-id" className="block text-[12px] font-medium text-[#5B6575]">
+                      Receiver Account ID or UPI ID
+                    </label>
+                    {detectInputType(gatewayMode === 'simulated' ? toAccount : rzpPayeeId) && (
+                      <span className="text-[10px] font-medium text-[#1F4FD8] bg-[#EEF3FD] px-1.5 py-0.5 rounded-[4px]">
+                        {detectInputType(gatewayMode === 'simulated' ? toAccount : rzpPayeeId)}
+                      </span>
+                    )}
+                  </div>
                   <div className="relative">
                     <input
                       id="payee-id"
                       type="text"
                       required
-                      placeholder="Enter account ID (e.g. ACC_0015) or UPI ID"
+                      placeholder="Enter account ID, 10-digit mobile, or UPI ID"
                       value={gatewayMode === 'simulated' ? toAccount : rzpPayeeId}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -773,13 +833,27 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                               <span className="text-[13px] font-semibold text-[#17202E] truncate">
                                 {resolvedPayee.display_name}
                               </span>
-                              <span className="px-1.5 py-0.5 text-[10px] font-medium bg-[#13805B]/15 text-[#13805B] border border-[#13805B]/30 rounded-[4px] whitespace-nowrap">
-                                Simulated registry
+                              <span className={`px-1.5 py-0.5 text-[10px] font-medium border rounded-[4px] whitespace-nowrap ${
+                                resolvedPayee.verification === 'self_declared'
+                                  ? 'bg-[#B26B00]/10 text-[#B26B00] border-[#B26B00]/30'
+                                  : 'bg-[#13805B]/15 text-[#13805B] border-[#13805B]/30'
+                              }`}>
+                                {resolvedPayee.verification === 'self_declared' ? 'Self-declared, not bank-verified' : 'Simulated registry'}
                               </span>
                             </div>
                             <div className="text-[11px] font-mono text-[#5E6B7D] truncate">
-                              {resolvedPayee.handle}
+                              {resolvedPayee.vpa || resolvedPayee.handle}
                             </div>
+                            {resolvedPayee.masked_phone && (
+                              <div className="text-[11px] font-mono text-[#5E6B7D]">
+                                Mobile: {resolvedPayee.masked_phone}
+                              </div>
+                            )}
+                            {resolvedPayee.bank_name && (
+                              <div className="text-[11px] text-[#5E6B7D]">
+                                {resolvedPayee.bank_name}
+                              </div>
+                            )}
                           </div>
                         </div>
                         <div className="flex-shrink-0 ml-2 text-[#13805B]">
@@ -789,15 +863,59 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                         </div>
                       </div>
                     ) : (
-                      <div className="mt-2.5 p-3 bg-[#C0362C]/10 border border-[#C0362C]/20 rounded-[8px] flex items-center gap-2 text-[12px] text-[#C0362C]">
-                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                        </svg>
-                        <div>
-                          <span className="font-semibold">No account found</span>
-                          <span className="text-[11px] text-[#5E6B7D] ml-1.5">Please enter a valid simulated account ID or UPI handle.</span>
+                      resolvedPayee.kind === 'phone' ? (
+                        <div className="mt-2.5 p-3 bg-[#B26B00]/10 border border-[#B26B00]/20 rounded-[8px]">
+                          <div className="flex items-center gap-2 text-[12px] text-[#B26B00] mb-1.5">
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <span>No linked account for this number ({resolvedPayee.masked_phone || resolvedPayee.handle}).</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowLinkForm(true);
+                              if (resolvedPayee.handle && /^[0-9+ ]+$/.test(resolvedPayee.handle)) {
+                                setLinkPhone(resolvedPayee.handle.replace(/[^0-9]/g, '').slice(-10));
+                              }
+                            }}
+                            className="text-[11px] text-[#1F4FD8] font-medium hover:underline"
+                          >
+                            Link this number in simulated registry →
+                          </button>
                         </div>
-                      </div>
+                      ) : resolvedPayee.verification === 'format_only' ? (
+                        <div className="mt-2.5 p-3 bg-[#B26B00]/10 border border-[#B26B00]/20 rounded-[8px]">
+                          <div className="flex items-center gap-2 text-[12px] text-[#B26B00] mb-1.5">
+                            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                            </svg>
+                            <span>Format valid — not verified with a bank or simulated registry.</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setShowLinkForm(true);
+                              if (resolvedPayee.handle && resolvedPayee.handle.includes('@')) {
+                                setLinkUpiId(resolvedPayee.handle);
+                              }
+                            }}
+                            className="text-[11px] text-[#1F4FD8] font-medium hover:underline"
+                          >
+                            Link this UPI ID in simulated registry →
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="mt-2.5 p-3 bg-[#C0362C]/10 border border-[#C0362C]/20 rounded-[8px] flex items-center gap-2 text-[12px] text-[#C0362C]">
+                          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                          </svg>
+                          <div>
+                            <span className="font-semibold">No account found</span>
+                            <span className="text-[11px] text-[#5E6B7D] ml-1.5">Please enter a valid simulated account ID, phone, or UPI handle.</span>
+                          </div>
+                        </div>
+                      )
                     )
                   )}
                 </div>
@@ -852,6 +970,81 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                   </button>
                 </div>
               </form>
+
+              {/* Link Handle / Phone Collapsible Form */}
+              <div className="border border-[#DCE0E7] rounded-[8px] overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowLinkForm(!showLinkForm);
+                    setLinkError(null);
+                    setLinkSuccess(false);
+                  }}
+                  className="w-full flex items-center justify-between px-3.5 py-2.5 text-[12px] font-medium text-[#1F4FD8] bg-[#F4F5F7] hover:bg-[#EEF3FD] transition-colors"
+                >
+                  <span className="flex items-center gap-2">
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
+                    </svg>
+                    Link my UPI ID / phone (demo)
+                  </span>
+                  <svg className={`w-4 h-4 transition-transform duration-200 ${showLinkForm ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
+                  </svg>
+                </button>
+
+                {showLinkForm && (
+                  <div className="p-3.5 bg-[#FFFFFF] border-t border-[#DCE0E7] space-y-3">
+                    <p className="text-[11px] text-[#5B6575]">
+                      Stored in memory only — cleared on restart. Enter a name and your UPI ID or phone to link.
+                    </p>
+
+                    <div className="space-y-2">
+                      <input
+                        type="text"
+                        placeholder="Display name (e.g. Shaurya Sharma)"
+                        value={linkDisplayName}
+                        onChange={(e) => setLinkDisplayName(e.target.value)}
+                        className="w-full px-3 py-2 text-[13px] border border-[#DCE0E7] rounded-[6px] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="UPI ID (e.g. name@ptyes or name@okhdfcbank)"
+                        value={linkUpiId}
+                        onChange={(e) => setLinkUpiId(e.target.value)}
+                        className="w-full px-3 py-2 text-[13px] font-mono border border-[#DCE0E7] rounded-[6px] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"
+                      />
+                      <input
+                        type="text"
+                        placeholder="10-digit mobile number (e.g. 9820012345)"
+                        value={linkPhone}
+                        onChange={(e) => setLinkPhone(e.target.value)}
+                        className="w-full px-3 py-2 text-[13px] font-mono border border-[#DCE0E7] rounded-[6px] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"
+                      />
+                    </div>
+
+                    {linkError && (
+                      <div className="text-[12px] text-[#C0362C] bg-[#C0362C]/10 border border-[#C0362C]/20 px-2.5 py-1.5 rounded-[4px]">
+                        {linkError}
+                      </div>
+                    )}
+                    {linkSuccess && (
+                      <div className="text-[12px] text-[#13805B] bg-[#13805B]/10 border border-[#13805B]/20 px-2.5 py-1.5 rounded-[4px]">
+                        ✓ Handle linked in simulated registry successfully.
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={handleRegisterLink}
+                      disabled={isLinking}
+                      className="w-full py-2 text-[13px] font-medium bg-[#1F4FD8] text-white rounded-[6px] hover:bg-[#183EB0] disabled:bg-[#D5DAE1] disabled:text-[#5E6B7D] transition-colors"
+                    >
+                      {isLinking ? 'Linking...' : 'Link handle'}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           )}
 

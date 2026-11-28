@@ -11,6 +11,8 @@ import type {
   RazorpayPaymentRecord,
   RazorpayVerifyRequest,
   RazorpayVerifyResponse,
+  RegisterHandleRequest,
+  RegisterHandleResponse,
   ResolvePayeeResponse,
   ScoredTransaction,
 } from '../types/fraud';
@@ -334,6 +336,19 @@ export async function fetchRazorpayPayments(limit = 50): Promise<RazorpayPayment
   const res = await fetch(`${API_BASE}/razorpay/payments?limit=${limit}`);
   if (!res.ok) {
     throw new Error(`Failed to fetch Razorpay payments: ${res.statusText}`);
+  }
+  return res.json();
+}
+
+export async function registerHandle(req: RegisterHandleRequest): Promise<RegisterHandleResponse> {
+  const res = await fetch(`${API_BASE}/gateway/register-handle`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(req),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to register handle.');
   }
   return res.json();
 }
