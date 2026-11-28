@@ -80,14 +80,21 @@ export interface ScorePaymentRequest {
   channel?: string;
 }
 
+function generateId(prefix: string): string {
+  const arr = new Uint8Array(4);
+  crypto.getRandomValues(arr);
+  const hex = Array.from(arr, (b) => b.toString(16).padStart(2, '0')).join('');
+  return `${prefix}_${Date.now()}_${hex}`;
+}
+
 export async function scorePayment(payment: ScorePaymentRequest): Promise<ScoredTransaction> {
   const payload = {
-    txn_id: `TXN_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+    txn_id: generateId('TXN'),
     timestamp: new Date().toISOString(),
     sender_id: payment.sender_id.trim(),
     receiver_id: payment.receiver_id.trim(),
     amount: payment.amount,
-    device_id: payment.device_id || `DEV_${Math.random().toString(36).substring(2, 8)}`,
+    device_id: payment.device_id || generateId('DEV'),
     ip: payment.ip || '192.168.1.1',
     channel: payment.channel || 'UPI',
   };
@@ -245,8 +252,8 @@ export function subscribeToLiveStream(
         try {
           const txn: ScoredTransaction = JSON.parse(event.data);
           onTransaction(txn);
-        } catch (e) {
-          console.error('Error parsing live transaction:', e);
+        } catch {
+          // Ignore malformed message in live feed
         }
       };
 

@@ -1,6 +1,7 @@
 """Scorer coordinating rules, graph cache, and ML scoring."""
 import time
 import numpy as np
+import xgboost as xgb
 from typing import Dict, List, Optional
 
 from app.graph_engine import GLOBAL_GRAPH
@@ -35,7 +36,7 @@ def score_transaction(
         try:
             features = extract_features(transaction, state=state, graph_cache=graph_cache)
             ensemble_score, model_scores, ensemble_reasons = GLOBAL_ENSEMBLE.score_transaction(
-                features, rule_score, transaction
+                features, rule_score, transaction, graph_cache=graph_cache
             )
             blended = int(round(0.4 * rule_score + 0.6 * ensemble_score))
             final_score = min(max(blended, 0), 100)
@@ -48,23 +49,48 @@ def score_transaction(
                     weight=int(round(0.6 * ensemble_score)),
                 )
             )
-            # SHAP-like contributions for supervised model
+            # Per-transaction feature contributions using XGBoost pred_contribs in plain language
             if GLOBAL_ENSEMBLE.supervised_model is not None:
                 try:
                     vec = np.array([[features.get(f, 0.0) for f in FEATURE_NAMES]], dtype=np.float32)
                     if hasattr(GLOBAL_ENSEMBLE.supervised_model, "get_booster"):
-                        contribs = GLOBAL_ENSEMBLE.supervised_model.get_booster().predict(vec, pred_contribs=True)
+                        booster = GLOBAL_ENSEMBLE.supervised_model.get_booster()
+                        dmatrix = xgb.DMatrix(vec, feature_names=FEATURE_NAMES)
+                        contribs = booster.predict(dmatrix, pred_contribs=True)
                         contrib_vals = contribs[0][:-1]
                     else:
                         contrib_vals = np.array([GLOBAL_ENSEMBLE.supervised_model.feature_importances_] * len(FEATURE_NAMES))[0]
+
+                    # Map top contributing features to clear human-readable explanations
+                    feature_explanations = {
+                        "amount": lambda v: f"Transaction amount ₹{v:,.2f} is higher than typical baseline",
+                        "amount_ratio_to_sender_avg": lambda v: f"Amount is {v:.1f}x higher than sender's historical average",
+                        "sender_txn_count_1m": lambda v: f"Rapid burst of {int(v)} transactions within 60 seconds",
+                        "sender_txn_count_5m": lambda v: f"Elevated velocity with {int(v)} transactions in past 5 minutes",
+                        "sender_account_age_seconds": lambda v: f"Account is brand new (created {int(v)}s ago)",
+                        "sender_distinct_receivers_5m": lambda v: f"Dispersing funds across {int(v)} distinct receivers rapidly",
+                        "receiver_distinct_senders_5m": lambda v: f"Receiver accumulating funds from {int(v)} distinct senders",
+                        "device_shared_accounts": lambda v: f"Device is shared across {int(v)} different accounts",
+                        "is_round_trip": lambda v: "Direct circular flow: money returned back to origin counterparty",
+                        "in_cycle": lambda v: "Participating in closed cyclical transaction loop (fraud ring)",
+                        "component_size": lambda v: f"Situated in dense transaction cluster of {int(v)} nodes",
+                        "neighbor_avg_risk": lambda v: f"Direct counterparties have elevated fraud risk ({v:.0%})",
+                        "sender_pagerank": lambda v: "Central authority hub in account network",
+                        "receiver_pagerank": lambda v: "High central network authority node",
+                    }
+
                     top_idxs = np.argsort(-np.abs(contrib_vals))[:2]
                     for idx in top_idxs:
                         fname = FEATURE_NAMES[idx]
                         fvalue = features.get(fname, 0.0)
+                        if fname in feature_explanations:
+                            expl_detail = feature_explanations[fname](fvalue)
+                        else:
+                            expl_detail = f"Feature '{fname}' (value {fvalue:.2f}) contributes to risk"
                         reasons.append(
                             Reason(
                                 rule="FEATURE_XGBOOST",
-                                detail=f"Feature '{fname}' (value {fvalue:.2f}) contributes to risk",
+                                detail=expl_detail,
                                 weight=1,
                             )
                         )
@@ -103,10 +129,13 @@ def score_transaction(
     # Ingest into graph engine using rule_score for exact parity with training pipeline
     GLOBAL_GRAPH.add_transaction(transaction, risk=rule_score / 100.0)
 
-    # 4. Decision thresholds
-    if final_score >= 70:
+    # 4. Decision thresholds (calibrated or defaults 40/70)
+    thresh_review = getattr(GLOBAL_ENSEMBLE, "thresholds", {}).get("review", 40)
+    thresh_block = getattr(GLOBAL_ENSEMBLE, "thresholds", {}).get("block", 70)
+
+    if final_score >= thresh_block:
         decision = "BLOCK"
-    elif final_score >= 40:
+    elif final_score >= thresh_review:
         decision = "REVIEW"
     else:
         decision = "ALLOW"

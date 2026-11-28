@@ -356,7 +356,7 @@ export const QrScannerPanel: React.FC<QrScannerPanelProps> = ({ onUpiDecoded, in
           <input
             type="text"
             required
-            placeholder="e.g. success@razorpay or upi://pay?pa=..."
+            placeholder="Enter account ID or UPI URI"
             value={manualInput}
             onChange={(e) => setManualInput(e.target.value)}
             className="flex-1 px-3 py-2 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] font-mono text-[12px] text-[#1B2433] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"

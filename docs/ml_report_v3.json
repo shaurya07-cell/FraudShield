@@ -1,0 +1,271 @@
+{
+  "timestamp": "2026-11-28T00:02:00.850952+00:00",
+  "total_test_samples": 16002,
+  "test_fraud_count": 472,
+  "thresholds": {
+    "review_threshold": 25,
+    "block_threshold": 50,
+    "val_fpr_review": 0.0024,
+    "val_fpr_block": 0.0017,
+    "scale": 100
+  },
+  "ablation_results": {
+    "rules_only": {
+      "precision": 0.6476190476190476,
+      "recall": 0.288135593220339,
+      "f1_score": 0.39882697947214074,
+      "roc_auc": 0.6328164050989338,
+      "pr_auc": 0.26592931976090717,
+      "false_positive_rate": 0.004764971023824855,
+      "confusion_matrix": [
+        [
+          15456,
+          74
+        ],
+        [
+          336,
+          136
+        ]
+      ]
+    },
+    "supervised_xgb": {
+      "precision": 0.8694779116465864,
+      "recall": 0.9173728813559322,
+      "f1_score": 0.8927835051546392,
+      "roc_auc": 0.9962998079168803,
+      "pr_auc": 0.9606546714373877,
+      "false_positive_rate": 0.004185447520927237,
+      "confusion_matrix": [
+        [
+          15465,
+          65
+        ],
+        [
+          39,
+          433
+        ]
+      ]
+    },
+    "anomaly_iforest": {
+      "precision": 0.11662531017369727,
+      "recall": 0.3983050847457627,
+      "f1_score": 0.18042226487523993,
+      "roc_auc": 0.7705277920263678,
+      "pr_auc": 0.08325559137202654,
+      "false_positive_rate": 0.09169349645846749,
+      "confusion_matrix": [
+        [
+          14106,
+          1424
+        ],
+        [
+          284,
+          188
+        ]
+      ]
+    },
+    "behaviour_profile": {
+      "precision": 0.06433408577878104,
+      "recall": 0.4830508474576271,
+      "f1_score": 0.11354581673306773,
+      "roc_auc": 0.7208560931821407,
+      "pr_auc": 0.12279459563349128,
+      "false_positive_rate": 0.21352221506761107,
+      "confusion_matrix": [
+        [
+          12214,
+          3316
+        ],
+        [
+          244,
+          228
+        ]
+      ]
+    },
+    "graph_model": {
+      "precision": 0.36203703703703705,
+      "recall": 0.8283898305084746,
+      "f1_score": 0.5038659793814433,
+      "roc_auc": 0.9664052353563906,
+      "pr_auc": 0.5484362677832434,
+      "false_positive_rate": 0.04436574372182872,
+      "confusion_matrix": [
+        [
+          14841,
+          689
+        ],
+        [
+          81,
+          391
+        ]
+      ]
+    },
+    "device_model": {
+      "precision": 0.1491635687732342,
+      "recall": 0.6800847457627118,
+      "f1_score": 0.24466463414634146,
+      "roc_auc": 0.8849366180274374,
+      "pr_auc": 0.4740837456727048,
+      "false_positive_rate": 0.11790083708950419,
+      "confusion_matrix": [
+        [
+          13699,
+          1831
+        ],
+        [
+          151,
+          321
+        ]
+      ]
+    },
+    "mule_model": {
+      "precision": 0.2988313856427379,
+      "recall": 0.7584745762711864,
+      "f1_score": 0.4287425149700599,
+      "roc_auc": 0.9609641535791851,
+      "pr_auc": 0.6629441404761707,
+      "false_positive_rate": 0.0540888602704443,
+      "confusion_matrix": [
+        [
+          14690,
+          840
+        ],
+        [
+          114,
+          358
+        ]
+      ]
+    },
+    "full_ensemble": {
+      "precision": 0.8817635270541082,
+      "recall": 0.9322033898305084,
+      "f1_score": 0.9062821833161689,
+      "roc_auc": 0.992935215602388,
+      "pr_auc": 0.9390886887181327,
+      "false_positive_rate": 0.0037990985189954927,
+      "confusion_matrix": [
+        [
+          15471,
+          59
+        ],
+        [
+          32,
+          440
+        ]
+      ]
+    }
+  },
+  "rolling_time_windows": [
+    {
+      "window": 1,
+      "samples": 5334,
+      "fraud": 157,
+      "precision": 0.88125,
+      "recall": 0.8980891719745223,
+      "f1_score": 0.889589905362776,
+      "roc_auc": 0.988463180481035,
+      "fpr": 0.003670079196445818
+    },
+    {
+      "window": 2,
+      "samples": 5334,
+      "fraud": 161,
+      "precision": 0.8870056497175142,
+      "recall": 0.9751552795031055,
+      "f1_score": 0.9289940828402367,
+      "roc_auc": 0.9990910760962619,
+      "fpr": 0.0038662284941040014
+    },
+    {
+      "window": 3,
+      "samples": 5334,
+      "fraud": 154,
+      "precision": 0.8765432098765432,
+      "recall": 0.922077922077922,
+      "f1_score": 0.8987341772151899,
+      "roc_auc": 0.9911059018201874,
+      "fpr": 0.003861003861003861
+    }
+  ],
+  "attack_level_detection": {
+    "attacks_evaluated_in_test": 44,
+    "attacks_flagged": 43,
+    "attack_detection_rate": 0.9773,
+    "avg_transactions_before_detection": 1.53
+  },
+  "fpr_benchmarks": {
+    "warm_500_fpr_review": 0.004,
+    "warm_500_fpr_block": 0.002,
+    "cold_start_fpr_review": 0.0
+  },
+  "latency_profile": {
+    "supervised_xgb_ms": 0.353,
+    "anomaly_iforest_ms": 4.161,
+    "behaviour_profile_ms": 0.008,
+    "graph_model_ms": 0.313,
+    "device_model_ms": 0.343,
+    "mule_model_ms": 0.32,
+    "meta_model_ms": 2.347,
+    "total_ensemble_inference_ms": 7.844
+  },
+  "leakage_checks": {
+    "label_shuffle_auc": 0.5392020774444215,
+    "label_shuffle_pass": true,
+    "forbidden_feature_columns": [],
+    "forbidden_feature_check_pass": true,
+    "test_roc_auc": 0.9962998079168803,
+    "perfect_metric_check_pass": true,
+    "top_10_features": [
+      {
+        "rank": 1,
+        "feature": "sender_out_degree",
+        "importance": 0.3272
+      },
+      {
+        "rank": 2,
+        "feature": "sender_txn_count_1m",
+        "importance": 0.1149
+      },
+      {
+        "rank": 3,
+        "feature": "amount",
+        "importance": 0.099
+      },
+      {
+        "rank": 4,
+        "feature": "sender_pagerank",
+        "importance": 0.0884
+      },
+      {
+        "rank": 5,
+        "feature": "amount_ratio_to_sender_avg",
+        "importance": 0.0651
+      },
+      {
+        "rank": 6,
+        "feature": "sender_txn_count_5m",
+        "importance": 0.0554
+      },
+      {
+        "rank": 7,
+        "feature": "sender_distinct_receivers_5m",
+        "importance": 0.0352
+      },
+      {
+        "rank": 8,
+        "feature": "device_shared_accounts",
+        "importance": 0.0326
+      },
+      {
+        "rank": 9,
+        "feature": "sender_clustering",
+        "importance": 0.0321
+      },
+      {
+        "rank": 10,
+        "feature": "is_round_trip",
+        "importance": 0.0237
+      }
+    ]
+  }
+}

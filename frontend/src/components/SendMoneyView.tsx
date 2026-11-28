@@ -74,7 +74,6 @@ interface SendMoneyViewProps {
   selfTransfer?: boolean;
 }
 
-// Preset verified contacts to give authentic banking feel while using valid backend accounts
 interface PresetContact {
   name: string;
   handle: string;
@@ -85,32 +84,32 @@ interface PresetContact {
 
 const PRESET_CONTACTS: PresetContact[] = [
   {
-    name: 'Rohan Sharma',
-    handle: 'rohan.sharma@upi',
+    name: 'Demo Account (ACC_0015)',
+    handle: 'ACC_0015',
     accountId: 'ACC_0015',
     avatarBg: 'bg-[#1F4FD8]',
-    role: 'Frequent Payee',
+    role: 'Demo Receiver',
   },
   {
-    name: 'Priya Patel',
-    handle: 'priya.patel@upi',
+    name: 'Demo Account (ACC_0042)',
+    handle: 'ACC_0042',
     accountId: 'ACC_0042',
     avatarBg: 'bg-[#13805B]',
-    role: 'Vendor / Retail',
+    role: 'Demo Receiver',
   },
   {
-    name: 'Razorpay Merchant',
-    handle: 'merchant@razorpay',
+    name: 'Demo Payee (Razorpay)',
+    handle: 'success@razorpay',
     accountId: 'success@razorpay',
     avatarBg: 'bg-[#6B4FD1]',
-    role: 'Verified Merchant',
+    role: 'Test mode, no real money',
   },
   {
-    name: 'Vikram Malhotra',
-    handle: 'vikram.m@upi',
+    name: 'Demo Account (ACC_0120)',
+    handle: 'ACC_0120',
     accountId: 'ACC_0120',
     avatarBg: 'bg-[#B7791F]',
-    role: 'Business Partner',
+    role: 'Demo Receiver',
   },
 ];
 
@@ -121,7 +120,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   autoScan,
   selfTransfer,
 }) => {
-  // Gateway mode: simulated (UPI / Bank transfer) or razorpay (Cards / NetBanking)
   const [gatewayMode, setGatewayMode] = useState<'simulated' | 'razorpay'>(initialMode || 'simulated');
   const [razorpayConfig, setRazorpayConfig] = useState<RazorpayConfig | null>(null);
 
@@ -131,9 +129,9 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
 
   // Sender details
   const [fromAccount] = useState('ACC_0010');
-  const [toAccount, setToAccount] = useState(selfTransfer ? 'ACC_0010' : 'success@razorpay');
-  const [toDisplayName, setToDisplayName] = useState(selfTransfer ? 'Self Account' : 'Razorpay Merchant');
-  const [amount, setAmount] = useState('1250');
+  const [toAccount, setToAccount] = useState(selfTransfer ? 'ACC_0010' : 'ACC_0015');
+  const [toDisplayName, setToDisplayName] = useState(selfTransfer ? 'Self Account' : 'Demo Account (ACC_0015)');
+  const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [senderAccount, setSenderAccount] = useState<GatewayAccount | null>(null);
 
@@ -150,7 +148,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   // Razorpay mode state
   const [rzpCustomerId] = useState('ACC_0010');
   const [rzpPayeeId, setRzpPayeeId] = useState('success@razorpay');
-  const [rzpAmount, setRzpAmount] = useState('1250');
+  const [rzpAmount, setRzpAmount] = useState('');
   const [rzpOutcome, setRzpOutcome] = useState<RazorpayOutcome | null>(null);
   const [rzpError, setRzpError] = useState<string | null>(null);
   const [rzpPayments, setRzpPayments] = useState<RazorpayPaymentRecord[]>([]);
@@ -282,7 +280,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
     e.preventDefault();
     const payee = gatewayMode === 'simulated' ? toAccount : rzpPayeeId;
     if (!payee.trim()) {
-      setErrorMessage('Please select or enter a valid recipient UPI ID or account.');
+      setErrorMessage('Please enter a recipient account ID or UPI ID.');
       return;
     }
     setErrorMessage(null);
@@ -301,7 +299,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
     setStep('review');
   };
 
-  // Trigger payment execution
   const executeSimulatedPayment = async () => {
     const numAmount = parseFloat(amount);
     if (isNaN(numAmount) || numAmount <= 0) return;
@@ -314,6 +311,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
         from_account: fromAccount,
         to_account: toAccount,
         amount: numAmount,
+        note: note.trim() || undefined,
       });
 
       setPayResult(res);
@@ -329,7 +327,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
     }
   };
 
-  // Trigger Razorpay payment flow
   const executeRazorpayPayment = async () => {
     const numAmount = parseFloat(rzpAmount);
     if (isNaN(numAmount) || numAmount <= 0) return;
@@ -340,7 +337,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
     try {
       const isLoaded = await loadRazorpayScript();
       if (!isLoaded) {
-        throw new Error('Razorpay secure checkout could not be loaded. Check your internet connection.');
+        throw new Error('Razorpay secure checkout could not be loaded. Check your network.');
       }
 
       const orderData = await createRazorpayOrder({
@@ -403,9 +400,9 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
           }
         },
         prefill: {
-          name: senderAccount?.name || 'Aarav Sharma',
-          email: 'customer@fraudshield.internal',
-          contact: '+919876543210',
+          name: senderAccount?.name || '',
+          email: '',
+          contact: '',
         },
         theme: {
           color: '#1F4FD8',
@@ -434,12 +431,11 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
 
       rzpInstance.open();
     } catch (err: any) {
-      setRzpError(err.message || 'Failed to initiate secure checkout.');
+      setRzpError(err.message || 'Failed to initiate checkout.');
       setStep('review');
     }
   };
 
-  // Confirm OTP / Two-Factor Authentication
   const handleConfirmOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!payResult || !payResult.payment_id) return;
@@ -458,7 +454,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
       loadSenderAccount(fromAccount);
       loadRecentPayments();
     } catch (err: any) {
-      setConfirmError(err.message || 'Invalid security verification passcode.');
+      setConfirmError(err.message || 'Invalid verification passcode.');
     } finally {
       setIsConfirming(false);
     }
@@ -471,6 +467,9 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
     setOtpInput('');
     setErrorMessage(null);
     setRzpError(null);
+    setAmount('');
+    setRzpAmount('');
+    setNote('');
     if (gatewayMode === 'simulated') {
       loadSenderAccount(fromAccount);
     }
@@ -479,13 +478,15 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const currentPayee = gatewayMode === 'simulated' ? toAccount : rzpPayeeId;
   const currentAmount = gatewayMode === 'simulated' ? amount : rzpAmount;
 
+  const shortId = (id: string) => (id && id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id);
+
   const getInitials = (text: string) => {
     const clean = text.split('@')[0] || text;
     return clean.slice(0, 2).toUpperCase();
   };
 
   const STEPS: StepItem[] = [
-    { id: 'payee', label: 'Recipient' },
+    { id: 'payee', label: 'Receiver' },
     { id: 'amount', label: 'Amount' },
     { id: 'review', label: 'Authorize' },
     { id: 'result', label: 'Confirmation' },
@@ -501,7 +502,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   return (
     <div className="w-full min-h-[calc(100vh-48px)] bg-[#F4F5F7] py-6 sm:py-8 px-4 flex justify-center items-start">
       <div className="w-full sm:max-w-[560px] space-y-4">
-        {/* Main Bank Card Container */}
+        {/* Main Card Container */}
         <div className="bg-[#FFFFFF] border border-[#DCE0E7] rounded-[10px] p-5 sm:p-6 shadow-sm">
           {/* Header & Method Switch */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4 pb-3 border-b border-[#E3E7EE]">
@@ -513,10 +514,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
               </div>
               <div>
                 <h1 className="text-[16px] font-semibold text-[#1B2433]">Send Money</h1>
-                <div className="flex items-center gap-1.5 text-[11px] text-[#13805B] font-medium">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#13805B]" />
-                  <span>256-bit Encrypted · Real-Time Network</span>
-                </div>
+                <div className="text-[11px] text-[#5B6575]">Demo accounts · Test environment</div>
               </div>
             </div>
 
@@ -532,7 +530,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       : 'text-[#5B6575] hover:text-[#1B2433]'
                   }`}
                 >
-                  Direct UPI / Bank
+                  Direct Pay
                 </button>
                 <button
                   type="button"
@@ -543,12 +541,12 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       : 'text-[#5B6575] hover:text-[#1B2433]'
                   }`}
                 >
-                  Card / NetBanking
+                  Card / Net (Test mode, no real money)
                 </button>
               </div>
             ) : (
               <span className="self-start sm:self-auto text-[11px] font-medium text-[#13805B] bg-[#13805B]/10 border border-[#13805B]/20 px-2.5 py-1 rounded-[4px] whitespace-nowrap">
-                Direct Bank Transfer
+                Direct Pay (Demo)
               </span>
             )}
           </div>
@@ -580,27 +578,28 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 <div className="flex items-center justify-between text-[11px] text-white/70">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-[#1E8E5A]" />
-                    <span className="font-medium text-white/90">FraudShield Federal Bank</span>
+                    <span className="font-medium text-white/90">FraudShield Pay (Demo)</span>
                   </div>
-                  <span className="font-mono">Primary Savings</span>
+                  <span className="font-mono text-white/70">Demo Account</span>
                 </div>
                 <div className="mt-2.5 flex items-baseline justify-between">
                   <div>
-                    <div className="text-[10px] text-white/60 tracking-wider">AVAILABLE BALANCE</div>
+                    <div className="text-[10px] text-white/60 tracking-wider uppercase">Available Balance</div>
                     <div className="text-[20px] font-semibold font-mono tabular-nums text-white">
-                      ₹{senderAccount ? senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '1,84,250.00'}
+                      {senderAccount ? `₹${senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] font-medium text-white/90">{senderAccount?.name || 'Aarav Sharma'}</div>
+                    <div className="text-[11px] font-medium text-white/90">{senderAccount?.name || '—'}</div>
                     <div className="text-[11px] font-mono text-white/60">•••• {fromAccount.slice(-4)}</div>
                   </div>
                 </div>
+                <div className="mt-2 text-[10px] text-white/50">Demo accounts · Account names and balances are demo data.</div>
               </div>
 
               {/* QR Scanner Expandable Header */}
               <div className="flex items-center justify-between">
-                <div className="text-[13px] font-semibold text-[#1B2433]">Recipient details</div>
+                <div className="text-[13px] font-semibold text-[#1B2433]">Receiver details</div>
                 <button
                   type="button"
                   onClick={() => setShowQrScanner(!showQrScanner)}
@@ -609,7 +608,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.75}>
                     <path strokeLinecap="round" strokeLinejoin="round" d="M12 4v1m6 11h2m-6 0h-2v4m0-11v3m0 0h.01M12 12h4.01M16 20h4M4 12h4m12 0h.01M5 8h2a1 1 0 001-1V5a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1zm12 0h2a1 1 0 001-1V5a1 1 0 00-1-1h-2a1 1 0 00-1 1v2a1 1 0 001 1zM5 20h2a1 1 0 001-1v-2a1 1 0 00-1-1H5a1 1 0 00-1 1v2a1 1 0 001 1z" />
                   </svg>
-                  <span>{showQrScanner ? 'Hide QR scanner' : 'Scan UPI QR code'}</span>
+                  <span>{showQrScanner ? 'Hide QR scanner' : 'Scan QR code'}</span>
                 </button>
               </div>
 
@@ -627,14 +626,14 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
               <form onSubmit={handleProceedToAmount} className="space-y-4">
                 <div>
                   <label htmlFor="payee-id" className="block text-[12px] font-medium text-[#5B6575] mb-1">
-                    Enter UPI ID, Phone Number or Account ID
+                    Receiver Account ID or UPI ID
                   </label>
                   <div className="relative">
                     <input
                       id="payee-id"
                       type="text"
                       required
-                      placeholder="e.g. rohan.sharma@upi or ACC_0015"
+                      placeholder="Enter account ID or UPI ID"
                       value={gatewayMode === 'simulated' ? toAccount : rzpPayeeId}
                       onChange={(e) => {
                         const val = e.target.value;
@@ -656,12 +655,13 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                   </div>
                 </div>
 
-                {/* Verified Recent Contacts List */}
+                {/* Demo Contacts List */}
                 <div>
-                  <div className="text-[12px] font-medium text-[#5B6575] mb-2 flex items-center justify-between">
-                    <span>Frequent & Verified Recipients</span>
-                    <span className="text-[11px] text-[#1E8E5A] font-medium">● Instant Settlement</span>
+                  <div className="text-[12px] font-medium text-[#5B6575] mb-1 flex items-center justify-between">
+                    <span>Demo Receivers</span>
+                    <span className="text-[11px] text-[#5B6575]">Demo accounts</span>
                   </div>
+                  <div className="text-[11px] text-[#5B6575] mb-2">Account names and balances are demo data.</div>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {PRESET_CONTACTS.map((contact) => {
                       const isSelected = (gatewayMode === 'simulated' ? toAccount : rzpPayeeId) === contact.accountId;
@@ -682,9 +682,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                           <div className="min-w-0 flex-1">
                             <div className="text-[13px] font-semibold text-[#1B2433] truncate flex items-center gap-1">
                               <span>{contact.name}</span>
-                              <svg className="w-3.5 h-3.5 text-[#1E8E5A] flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
-                              </svg>
                             </div>
                             <div className="text-[11px] font-mono text-[#5B6575] truncate">{contact.handle}</div>
                           </div>
@@ -735,7 +732,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 </button>
               </div>
 
-              {/* Large Amount Input */}
+              {/* Amount Input */}
               <div className="text-center py-4 bg-[#FFFFFF] rounded-[8px] border border-[#DCE0E7] p-4">
                 <div className="text-[12px] text-[#5B6575] mb-2 font-medium">Transfer Amount</div>
                 <div className="flex items-center justify-center">
@@ -755,26 +752,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                     className="w-56 text-[36px] font-bold font-mono text-center text-[#1B2433] focus:outline-none border-b-2 border-[#1F4FD8] bg-transparent"
                   />
                 </div>
-                <div className="mt-2 text-[11px] text-[#5B6575]">
-                  Zero processing fees · Immediate RTGS/UPI settlement
-                </div>
-              </div>
-
-              {/* Quick Amount Chips */}
-              <div className="grid grid-cols-4 gap-2">
-                {['500', '1000', '2500', '5000'].map((chip) => (
-                  <button
-                    key={chip}
-                    type="button"
-                    onClick={() => {
-                      if (gatewayMode === 'simulated') setAmount(chip);
-                      else setRzpAmount(chip);
-                    }}
-                    className="py-2 min-h-[40px] text-[12px] font-mono font-medium bg-[#FFFFFF] border border-[#DCE0E7] hover:border-[#1F4FD8] hover:bg-[#EEF3FD] rounded-[6px] text-[#1B2433] transition-colors"
-                  >
-                    +₹{chip}
-                  </button>
-                ))}
               </div>
 
               {/* Optional Transfer Note */}
@@ -785,7 +762,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 <input
                   id="transfer-note"
                   type="text"
-                  placeholder="e.g. Invoice payment, groceries, dinner"
+                  placeholder="Optional note"
                   value={note}
                   onChange={(e) => setNote(e.target.value)}
                   className="w-full px-3 py-2 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] text-[13px] text-[#1B2433] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"
@@ -818,7 +795,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
           {/* ========================================================================= */}
           {step === 'review' && (
             <div className="space-y-4">
-              {/* Payee Card with Avatar */}
+              {/* Payee Card */}
               <div className="p-4 bg-gradient-to-b from-[#FFFFFF] to-[#F4F5F7] border border-[#DCE0E7] rounded-[8px] text-center space-y-2">
                 <div className="w-12 h-12 mx-auto rounded-full bg-[#1F4FD8] text-[#FFFFFF] flex items-center justify-center font-mono text-[16px] font-semibold shadow-xs">
                   {getInitials(toDisplayName || currentPayee)}
@@ -841,18 +818,14 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                   <span className="text-[#5B6575]">Debited from</span>
                   <span className="font-medium text-[#1B2433] flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-[#1E8E5A]" />
-                    <span>FraudShield Primary (•••• {fromAccount.slice(-4)})</span>
+                    <span>Demo Account ({fromAccount})</span>
                   </span>
                 </div>
                 <div className="p-3 flex justify-between items-center">
                   <span className="text-[#5B6575]">Settlement Rail</span>
                   <span className="font-medium text-[#1B2433]">
-                    {gatewayMode === 'simulated' ? 'Instant UPI Real-Time Rail' : 'Razorpay Secure Gateway'}
+                    {gatewayMode === 'simulated' ? 'Direct Pay (Demo)' : 'Razorpay (Test mode, no real money)'}
                   </span>
-                </div>
-                <div className="p-3 flex justify-between items-center">
-                  <span className="text-[#5B6575]">Transfer Fee</span>
-                  <span className="font-medium text-[#1E8E5A]">₹0.00 (Zero Fee)</span>
                 </div>
                 <div className="p-3 flex justify-between items-center">
                   <span className="text-[#5B6575]">Security Checkpoint</span>
@@ -860,17 +833,9 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                     <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
                       <path strokeLinecap="round" strokeLinejoin="round" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
                     </svg>
-                    <span>ML Ensemble + Graph AI</span>
+                    <span>Real-time ML Risk Scoring</span>
                   </span>
                 </div>
-              </div>
-
-              {/* Security Statement */}
-              <div className="flex items-center gap-2 p-3 bg-[#EEF3FD] rounded-[6px] border border-[#1F4FD8]/20 text-[11px] text-[#1B2433]">
-                <svg className="w-4 h-4 text-[#1F4FD8] flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                </svg>
-                <span>Protected by FraudShield AI real-time risk engine. Every transaction is scored in &lt;50ms.</span>
               </div>
 
               <div className="pt-2 flex gap-2">
@@ -980,14 +945,14 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       <div>
                         Remaining Balance:{' '}
                         <span className="font-semibold text-[#1B2433]">
-                          ₹{payResult.sender_balance_after !== null && payResult.sender_balance_after !== undefined
-                            ? payResult.sender_balance_after.toLocaleString('en-IN', { minimumFractionDigits: 2 })
+                          {payResult.sender_balance_after !== null && payResult.sender_balance_after !== undefined
+                            ? `₹${payResult.sender_balance_after.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
                             : '—'}
                         </span>
                       </div>
                     </div>
 
-                    {/* Official Receipt Action */}
+                    {/* Receipt Action */}
                     {(payResult.status === 'SUCCESS' || payResult.status === 'DECLINED') && payResult.reference_id && (
                       <div className="mt-4 pt-3 border-t border-[#E3E7EE] flex justify-end">
                         <button
@@ -1000,7 +965,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                               const rcp = await fetchPaymentReceipt(payResult.reference_id);
                               setSelectedReceipt(rcp);
                             } catch (err: any) {
-                              setErrorMessage(err.message || 'Receipt could not be loaded.');
+                              setErrorMessage(err.message || 'Receipt not available.');
                             } finally {
                               setIsReceiptLoading(false);
                             }
@@ -1016,23 +981,23 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                     )}
                   </div>
 
-                  {/* 2FA Verification Box when PENDING_VERIFICATION */}
+                  {/* 2FA Verification Box */}
                   {payResult.status === 'PENDING_VERIFICATION' && (
                     <div className="p-4 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[8px] space-y-3 shadow-xs">
                       <div className="flex items-center justify-between">
-                        <span className="text-[13px] font-semibold text-[#1B2433]">Bank Security Code (2FA)</span>
+                        <span className="text-[13px] font-semibold text-[#1B2433]">Security Verification (2FA)</span>
                         {payResult.demo_otp && (
                           <button
                             type="button"
                             onClick={() => setOtpInput(payResult.demo_otp!)}
                             className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#EEF3FD] text-[#1F4FD8] border border-[#1F4FD8]/20 rounded hover:bg-[#DCE7FB]"
                           >
-                            Passcode: {payResult.demo_otp} (Tap to fill)
+                            Demo OTP: {payResult.demo_otp} (Tap to fill)
                           </button>
                         )}
                       </div>
                       <p className="text-[12px] text-[#5B6575]">
-                        Enter the 6-digit verification code to confirm and settle this transfer.
+                        Enter the verification passcode to authorize and settle this payment.
                       </p>
 
                       {confirmError && (
@@ -1046,7 +1011,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                           type="text"
                           maxLength={6}
                           required
-                          placeholder="Enter 6-digit OTP"
+                          placeholder="Enter 6-digit code"
                           value={otpInput}
                           onChange={(e) => setOtpInput(e.target.value.trim())}
                           className="flex-1 px-3 py-2 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] font-mono text-[14px] text-[#1B2433] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"
@@ -1110,6 +1075,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       </div>
                       <DecisionBadge decision={rzpOutcome.decision} score={rzpOutcome.risk_score} />
                     </div>
+                    <div className="text-[11px] text-[#5B6575] mb-2">Test mode, no real money</div>
                     <p className="text-[13px] text-[#1B2433] leading-relaxed">{rzpOutcome.message}</p>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 pt-3 border-t border-[#E3E7EE] text-[12px] text-[#5B6575] font-mono tabular-nums">
@@ -1238,8 +1204,8 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       const zebra = idx % 2 === 1 ? 'bg-[#F4F5F7]/30' : 'bg-[#FFFFFF]';
                       return (
                         <tr key={p.payment_id} className={`${zebra} hover:bg-[#EEF3FD]/50 transition-colors`}>
-                          <td className="py-2.5 pr-2 font-mono text-[#1B2433]">{p.from_account}</td>
-                          <td className="py-2.5 px-2 font-mono text-[#1B2433]">{p.to_account}</td>
+                          <td className="py-2.5 pr-2 font-mono text-[#1B2433]">{shortId(p.from_account)}</td>
+                          <td className="py-2.5 px-2 font-mono text-[#1B2433]">{shortId(p.to_account)}</td>
                           <td className="py-2.5 px-2 text-right font-medium font-mono tabular-nums text-[#1B2433]">
                             ₹{p.amount.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
                           </td>
@@ -1311,7 +1277,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       return (
                         <tr key={p.order_id} className={`${zebra} hover:bg-[#EEF3FD]/50 transition-colors`}>
                           <td className="py-2.5 pr-2 font-mono text-[11px] text-[#1B2433] max-w-[140px] truncate" title={p.order_id}>
-                            {p.order_id}
+                            {shortId(p.order_id)}
                           </td>
                           <td className="py-2.5 px-2 text-right font-medium font-mono tabular-nums text-[#1B2433]">
                             ₹{p.amount.toLocaleString('en-IN', { minimumFractionDigits: 0 })}

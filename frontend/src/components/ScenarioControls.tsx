@@ -17,8 +17,11 @@ export const ScenarioControls: React.FC<ScenarioControlsProps> = ({
     <div className="w-full bg-[#FFFFFF] border border-[#E3E7EE] rounded-[6px] p-4">
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-3">
         <div className="flex flex-wrap items-center gap-2">
-          <div className="border-l-[3px] border-l-[#1F4FD8] pl-2.5 py-0.5 mr-2">
+          <div className="border-l-[3px] border-l-[#1F4FD8] pl-2.5 py-0.5 mr-2 flex items-center gap-2">
             <span className="text-[14px] font-semibold text-[#1B2433]">Run scenario</span>
+            <span className="text-[11px] text-[#5B6575] bg-[#F4F5F7] border border-[#DCE0E7] px-1.5 py-0.5 rounded-[4px] font-normal">
+              Synthetic traffic
+            </span>
           </div>
 
           <button

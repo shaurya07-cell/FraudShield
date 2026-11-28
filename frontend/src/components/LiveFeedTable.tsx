@@ -34,6 +34,8 @@ export const LiveFeedTable: React.FC<LiveFeedTableProps> = ({
     })}`;
   };
 
+  const shortId = (id: string) => (id && id.length > 10 ? `${id.slice(0, 6)}…${id.slice(-3)}` : id);
+
   return (
     <div className="w-full bg-[#FFFFFF] border border-[#E3E7EE] rounded-[6px] p-4 flex flex-col h-full">
       <div className="flex items-center justify-between pb-3 border-b border-[#E3E7EE] mb-2">
@@ -90,10 +92,10 @@ export const LiveFeedTable: React.FC<LiveFeedTableProps> = ({
                       {formatTime(txn.timestamp)}
                     </td>
                     <td className="py-2 px-2 font-mono text-[#1B2433] text-[12px] truncate max-w-[85px]" title={txn.sender_id}>
-                      {txn.sender_id}
+                      {shortId(txn.sender_id)}
                     </td>
                     <td className="py-2 px-2 font-mono text-[#1B2433] text-[12px] truncate max-w-[85px]" title={txn.receiver_id}>
-                      {txn.receiver_id}
+                      {shortId(txn.receiver_id)}
                     </td>
                     <td className="py-2 px-2 text-right font-medium font-mono tabular-nums text-[#1B2433] whitespace-nowrap text-[12px]">
                       {formatAmount(txn.amount)}
