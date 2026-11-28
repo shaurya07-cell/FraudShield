@@ -214,7 +214,7 @@ def get_graph() -> Dict[str, Any]:
 @app.post("/simulate/{scenario}")
 async def simulate(scenario: str) -> Dict[str, Any]:
     """Execute a simulated payment pattern, score sequentially, and broadcast with natural pacing."""
-    valid_scenarios = ["normal", "velocity_attack", "ring_attack", "fanout_cashout"]
+    valid_scenarios = ["normal", "velocity_attack", "ring_attack", "fanout_cashout", "bulk_payer"]
     if scenario not in valid_scenarios:
         raise HTTPException(
             status_code=400,
