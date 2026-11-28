@@ -28,9 +28,9 @@ export const CustomerNavbar: React.FC = () => {
           </span>
         </div>
 
-        <div className="flex items-center gap-1.5 px-2 py-0.5 bg-white/10 rounded-full text-white/80 text-[11px] font-medium flex-shrink-0">
+        <div className="flex items-center gap-1.5 px-2.5 py-0.5 bg-white/10 rounded-full text-white/80 text-[11px] font-medium flex-shrink-0">
           <span className="w-1.5 h-1.5 rounded-full bg-[#1E8E5A]" aria-hidden="true" />
-          <span>Demo Rail</span>
+          <span>Sandbox</span>
         </div>
       </div>
     </header>

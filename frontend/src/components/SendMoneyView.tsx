@@ -78,6 +78,9 @@ interface SendMoneyViewProps {
   selfTransfer?: boolean;
   showPinStep?: boolean;
   hideModelScores?: boolean;
+  isBalanceUnlocked?: boolean;
+  onRequireBalancePin?: () => void;
+  onMaskBalance?: () => void;
 }
 
 export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
@@ -88,6 +91,9 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   selfTransfer,
   showPinStep = true,
   hideModelScores = false,
+  isBalanceUnlocked = false,
+  onRequireBalancePin,
+  onMaskBalance,
 }) => {
   const [gatewayMode, setGatewayMode] = useState<'simulated' | 'razorpay'>(initialMode || 'simulated');
   const [razorpayConfig, setRazorpayConfig] = useState<RazorpayConfig | null>(null);
@@ -127,6 +133,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const [rzpOutcome, setRzpOutcome] = useState<RazorpayOutcome | null>(null);
   const [rzpError, setRzpError] = useState<string | null>(null);
   const [rzpPayments, setRzpPayments] = useState<RazorpayPaymentRecord[]>([]);
+  void rzpPayments;
 
   // Load Razorpay config on mount
   useEffect(() => {
@@ -468,7 +475,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
           }
         },
         prefill: {
-          name: senderAccount?.name || '',
+          name: 'Shaurya Hindocha',
           email: '',
           contact: '',
         },
@@ -546,8 +553,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const currentPayee = gatewayMode === 'simulated' ? toAccount : rzpPayeeId;
   const currentAmount = gatewayMode === 'simulated' ? amount : rzpAmount;
 
-  const shortId = (id: string) => (id && id.length > 12 ? `${id.slice(0, 6)}…${id.slice(-4)}` : id);
-
   const getInitials = (text: string) => {
     const clean = text.split('@')[0] || text;
     return clean.slice(0, 2).toUpperCase();
@@ -609,7 +614,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       : 'text-[#5B6575] hover:text-[#1B2433]'
                   }`}
                 >
-                  Card / Net (Test mode, no real money)
+                  Card / Net (Sandbox)
                 </button>
               </div>
             ) : (
@@ -653,12 +658,33 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 <div className="mt-2.5 flex items-baseline justify-between">
                   <div>
                     <div className="text-[10px] text-white/60 tracking-wider uppercase">Available Balance</div>
-                    <div className="text-[20px] font-semibold font-mono tabular-nums text-white">
-                      {senderAccount ? `₹${senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <div className="text-[20px] font-semibold font-mono tabular-nums text-white">
+                        {isBalanceUnlocked && senderAccount
+                          ? `₹${senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                          : '₹••••••'}
+                      </div>
+                      {isBalanceUnlocked ? (
+                        <button
+                          type="button"
+                          onClick={onMaskBalance}
+                          className="text-[10px] text-white/70 hover:text-white underline"
+                        >
+                          Hide
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={onRequireBalancePin}
+                          className="text-[10px] font-medium text-white bg-[#1F4FD8] hover:bg-[#183EB0] px-2 py-0.5 rounded shadow-2xs"
+                        >
+                          Check
+                        </button>
+                      )}
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-[11px] font-medium text-white/90">{senderAccount?.name || '—'}</div>
+                    <div className="text-[11px] font-medium text-white/90">Shaurya Hindocha</div>
                     <div className="text-[11px] font-mono text-white/60">•••• {fromAccount.slice(-4)}</div>
                   </div>
                 </div>
@@ -1062,7 +1088,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 <div className="p-3 flex justify-between items-center">
                   <span className="text-[#5B6575]">Settlement Rail</span>
                   <span className="font-medium text-[#1B2433]">
-                    {gatewayMode === 'simulated' ? 'Direct Pay' : 'Razorpay (Test mode, no real money)'}
+                    {gatewayMode === 'simulated' ? 'Direct Pay' : 'Razorpay (Sandbox)'}
                   </span>
                 </div>
                 <div className="p-3 flex justify-between items-center">
@@ -1209,9 +1235,9 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Receipt Action & Test environment note */}
+                    {/* Receipt Action & Sandbox note */}
                     <div className="mt-4 pt-3 border-t border-[#E3E7EE] flex items-center justify-between text-[11px] text-[#5B6575]">
-                      <span>Test environment, no real money</span>
+                      <span>Sandbox payment — no real funds move.</span>
                       {(payResult.status === 'SUCCESS' || payResult.status === 'DECLINED') && payResult.reference_id && (
                         <button
                           type="button"
@@ -1250,7 +1276,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                             onClick={() => setOtpInput(payResult.demo_otp!)}
                             className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#EEF3FD] text-[#1F4FD8] border border-[#1F4FD8]/20 rounded hover:bg-[#DCE7FB]"
                           >
-                            Verification Code: {payResult.demo_otp} (Tap to fill)
+                            Passcode: {payResult.demo_otp} (Tap to fill)
                           </button>
                         )}
                       </div>
@@ -1335,7 +1361,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       </div>
                       <DecisionBadge decision={rzpOutcome.decision} score={hideModelScores ? undefined : rzpOutcome.risk_score} />
                     </div>
-                    <div className="text-[11px] text-[#5B6575] mb-2">Test mode, no real money</div>
+                    <div className="text-[11px] text-[#5B6575] mb-2">Sandbox payment — no real funds move.</div>
                     <p className="text-[13px] text-[#1B2433] leading-relaxed">{rzpOutcome.message}</p>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-4 pt-3 border-t border-[#E3E7EE] text-[12px] text-[#5B6575] font-mono tabular-nums">
@@ -1414,154 +1440,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
           )}
         </div>
 
-        {/* --- RECENT STATEMENT / LEDGER --- */}
-        <div className="bg-[#FFFFFF] border border-[#DCE0E7] rounded-[10px] p-5 shadow-xs">
-          <div className="flex items-center justify-between mb-3 border-b border-[#E3E7EE] pb-2">
-            <div className="flex items-center gap-2">
-              <svg className="w-4 h-4 text-[#1F4FD8]" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2" />
-              </svg>
-              <h2 className="text-[14px] font-semibold text-[#1B2433]">
-                {gatewayMode === 'simulated' ? 'Account Transfer Ledger' : 'Razorpay Settlement Ledger'}
-              </h2>
-            </div>
-            <span className="text-[11px] text-[#5B6575] font-mono tabular-nums">
-              {gatewayMode === 'simulated' ? recentPayments.length : rzpPayments.length} records
-            </span>
-          </div>
-
-          {gatewayMode === 'simulated' ? (
-            recentPayments.length === 0 ? (
-              <p className="text-[12px] text-[#5B6575] text-center py-4">
-                No transactions recorded yet in this session.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[12px] border-collapse">
-                  <thead>
-                    <tr className="border-b border-[#E3E7EE] text-[#5B6575]">
-                      <th className="py-2 pr-2 font-normal">Sender</th>
-                      <th className="py-2 px-2 font-normal">Recipient</th>
-                      <th className="py-2 px-2 font-normal text-right">Amount</th>
-                      <th className="py-2 px-2 font-normal text-center">Status</th>
-                      <th className="py-2 pl-2 font-normal text-right">Receipt</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E3E7EE]">
-                    {recentPayments.map((p, idx) => {
-                      let badgeClass = 'bg-[#1E8E5A]/10 text-[#1E8E5A]';
-                      let statusLabel = 'Settled';
-
-                      if (p.status === 'PENDING_VERIFICATION') {
-                        badgeClass = 'bg-[#B7791F]/10 text-[#B7791F]';
-                        statusLabel = 'Pending 2FA';
-                      } else if (p.status === 'DECLINED') {
-                        badgeClass = 'bg-[#C0362C]/10 text-[#C0362C]';
-                        statusLabel = 'Declined';
-                      } else if (p.status === 'FAILED') {
-                        badgeClass = 'bg-[#5B6575]/10 text-[#5B6575]';
-                        statusLabel = 'Failed';
-                      }
-
-                      const zebra = idx % 2 === 1 ? 'bg-[#F4F5F7]/30' : 'bg-[#FFFFFF]';
-                      return (
-                        <tr key={p.payment_id} className={`${zebra} hover:bg-[#EEF3FD]/50 transition-colors`}>
-                          <td className="py-2.5 pr-2 font-mono text-[#1B2433]">{shortId(p.from_account)}</td>
-                          <td className="py-2.5 px-2 font-mono text-[#1B2433]">{shortId(p.to_account)}</td>
-                          <td className="py-2.5 px-2 text-right font-medium font-mono tabular-nums text-[#1B2433]">
-                            ₹{p.amount.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
-                          </td>
-                          <td className="py-2.5 px-2 text-center">
-                            <span className={`inline-block px-2 py-0.5 text-[10px] font-medium rounded-[4px] ${badgeClass}`}>
-                              {statusLabel}
-                            </span>
-                          </td>
-                          <td className="py-2.5 pl-2 text-right">
-                            {p.reference_id ? (
-                              <button
-                                type="button"
-                                onClick={async () => {
-                                  try {
-                                    const rcp = await fetchPaymentReceipt(p.reference_id!);
-                                    setSelectedReceipt(rcp);
-                                  } catch (err: any) {
-                                    setErrorMessage(err.message || 'Receipt not available.');
-                                  }
-                                }}
-                                className="text-[11px] font-medium text-[#1F4FD8] hover:underline whitespace-nowrap"
-                              >
-                                View
-                              </button>
-                            ) : (
-                              <span className="text-[#5B6575] text-[11px]">—</span>
-                            )}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )
-          ) : (
-            rzpPayments.length === 0 ? (
-              <p className="text-[12px] text-[#5B6575] text-center py-4">
-                No Razorpay transactions recorded yet.
-              </p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-left text-[12px] border-collapse">
-                  <thead>
-                    <tr className="border-b border-[#E3E7EE] text-[#5B6575]">
-                      <th className="py-2 pr-2 font-normal">Order Reference</th>
-                      <th className="py-2 px-2 font-normal text-right">Amount</th>
-                      <th className="py-2 px-2 font-normal text-center">Risk Score</th>
-                      <th className="py-2 pl-2 font-normal text-right">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-[#E3E7EE]">
-                    {rzpPayments.map((p, idx) => {
-                      let badgeClass = 'bg-[#1E8E5A]/10 text-[#1E8E5A]';
-                      let statusLabel: string = p.status;
-
-                      if (p.status === 'VERIFIED' || p.status === 'CAPTURED') {
-                        badgeClass = 'bg-[#1E8E5A]/10 text-[#1E8E5A]';
-                        statusLabel = 'Captured';
-                      } else if (p.status === 'ORDER_CREATED') {
-                        badgeClass = 'bg-[#1F4FD8]/10 text-[#1F4FD8]';
-                        statusLabel = 'Created';
-                      } else if (p.status === 'BLOCKED' || p.status === 'TAMPERED' || p.status === 'FAILED') {
-                        badgeClass = 'bg-[#C0362C]/10 text-[#C0362C]';
-                        statusLabel = p.status === 'BLOCKED' ? 'Blocked' : 'Declined';
-                      }
-
-                      const zebra = idx % 2 === 1 ? 'bg-[#F4F5F7]/30' : 'bg-[#FFFFFF]';
-                      return (
-                        <tr key={p.order_id} className={`${zebra} hover:bg-[#EEF3FD]/50 transition-colors`}>
-                          <td className="py-2.5 pr-2 font-mono text-[11px] text-[#1B2433] max-w-[140px] truncate" title={p.order_id}>
-                            {shortId(p.order_id)}
-                          </td>
-                          <td className="py-2.5 px-2 text-right font-medium font-mono tabular-nums text-[#1B2433]">
-                            ₹{p.amount.toLocaleString('en-IN', { minimumFractionDigits: 0 })}
-                          </td>
-                          <td className="py-2.5 px-3 text-center">
-                            <DecisionBadge decision={p.decision} score={p.risk_score} />
-                          </td>
-                          <td className="py-2.5 pl-2 text-right">
-                            <span className={`inline-block px-2 py-0.5 text-[10px] font-medium rounded-[4px] ${badgeClass}`}>
-                              {statusLabel}
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            )
-          )}
-        </div>
-
         {/* Structured Payment Receipt Modal */}
         <PaymentReceiptModal
           receipt={selectedReceipt}
@@ -1570,7 +1448,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
 
         {/* Footer Note */}
         <div className="text-center text-[11px] text-[#5B6575] py-2">
-          Test environment, no real money
+          Sandbox payment — no real funds move.
         </div>
       </div>
     </div>
