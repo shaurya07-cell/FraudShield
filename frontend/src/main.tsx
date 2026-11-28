@@ -11,7 +11,7 @@ createRoot(document.getElementById('root')!).render(
 
 // Register service worker in production only
 if ('serviceWorker' in navigator && import.meta.env.PROD) {
-  window.addEventListener('load', () => {
+  const registerSW = () => {
     navigator.serviceWorker
       .register('/sw.js', { scope: '/' })
       .then((reg) => {
@@ -20,5 +20,11 @@ if ('serviceWorker' in navigator && import.meta.env.PROD) {
       .catch((err) => {
         console.warn('[SW] Registration failed:', err);
       });
-  });
+  };
+
+  if (document.readyState === 'complete') {
+    registerSW();
+  } else {
+    window.addEventListener('load', registerSW);
+  }
 }
