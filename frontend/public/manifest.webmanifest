@@ -1,6 +1,8 @@
 {
+  "id": "/",
   "name": "FraudShield",
   "short_name": "FraudShield",
+  "description": "Real-time payment fraud detection with ML ensemble scoring and graph analytics",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
