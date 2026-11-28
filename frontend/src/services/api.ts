@@ -11,6 +11,7 @@ import type {
   RazorpayPaymentRecord,
   RazorpayVerifyRequest,
   RazorpayVerifyResponse,
+  ResolvePayeeResponse,
   ScoredTransaction,
 } from '../types/fraud';
 
@@ -223,6 +224,15 @@ export async function resetGateway(): Promise<void> {
   if (!res.ok) {
     throw new Error(`Failed to reset gateway.`);
   }
+}
+
+export async function resolvePayee(handle: string): Promise<ResolvePayeeResponse> {
+  const res = await fetch(`${API_BASE}/gateway/resolve?handle=${encodeURIComponent(handle)}`);
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to resolve payee.');
+  }
+  return res.json();
 }
 
 // --- WebSocket Streaming ---

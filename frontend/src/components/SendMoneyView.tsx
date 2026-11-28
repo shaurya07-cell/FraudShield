@@ -9,6 +9,7 @@ import {
   verifyRazorpayPayment,
   fetchRazorpayPayments,
   fetchPaymentReceipt,
+  resolvePayee,
   PaymentReceipt,
 } from '../services/api';
 import type {
@@ -19,6 +20,7 @@ import type {
   RazorpayConfig,
   RazorpayPaymentRecord,
   Reason,
+  ResolvePayeeResponse,
 } from '../types/fraud';
 import { DecisionBadge } from './DecisionBadge';
 import { Stepper, StepItem } from './Stepper';
@@ -75,7 +77,6 @@ interface SendMoneyViewProps {
 }
 
 interface PresetContact {
-  name: string;
   handle: string;
   accountId: string;
   avatarBg: string;
@@ -84,28 +85,24 @@ interface PresetContact {
 
 const PRESET_CONTACTS: PresetContact[] = [
   {
-    name: 'Demo Account (ACC_0015)',
     handle: 'ACC_0015',
     accountId: 'ACC_0015',
     avatarBg: 'bg-[#1F4FD8]',
     role: 'Demo Receiver',
   },
   {
-    name: 'Demo Account (ACC_0042)',
     handle: 'ACC_0042',
     accountId: 'ACC_0042',
     avatarBg: 'bg-[#13805B]',
     role: 'Demo Receiver',
   },
   {
-    name: 'Demo Payee (Razorpay)',
     handle: 'success@razorpay',
     accountId: 'success@razorpay',
     avatarBg: 'bg-[#6B4FD1]',
     role: 'Test mode, no real money',
   },
   {
-    name: 'Demo Account (ACC_0120)',
     handle: 'ACC_0120',
     accountId: 'ACC_0120',
     avatarBg: 'bg-[#B7791F]',
@@ -130,10 +127,16 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   // Sender details
   const [fromAccount] = useState('ACC_0010');
   const [toAccount, setToAccount] = useState(selfTransfer ? 'ACC_0010' : 'ACC_0015');
-  const [toDisplayName, setToDisplayName] = useState(selfTransfer ? 'Self Account' : 'Demo Account (ACC_0015)');
+  const [toDisplayName, setToDisplayName] = useState(selfTransfer ? 'Self Account' : 'ACC_0015');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [senderAccount, setSenderAccount] = useState<GatewayAccount | null>(null);
+
+  // Payee resolution state
+  const [presetNames, setPresetNames] = useState<Record<string, string>>({});
+  const [resolvedPayee, setResolvedPayee] = useState<ResolvePayeeResponse | null>(null);
+  const [isResolving, setIsResolving] = useState<boolean>(false);
+  const [resolveError, setResolveError] = useState<string | null>(null);
 
   // Results & verification
   const [payResult, setPayResult] = useState<GatewayPayResponse | null>(null);
@@ -239,6 +242,73 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
     };
   }, [gatewayMode]);
 
+  const resolveTarget = useCallback(async (handle: string) => {
+    const trimmed = (handle || '').trim();
+    if (!trimmed) {
+      setResolvedPayee(null);
+      setIsResolving(false);
+      setResolveError(null);
+      return;
+    }
+
+    setIsResolving(true);
+    setResolveError(null);
+    try {
+      const res = await resolvePayee(trimmed);
+      setResolvedPayee(res);
+      if (res.found && res.display_name) {
+        setToDisplayName(res.display_name);
+      }
+    } catch (err: any) {
+      setResolvedPayee(null);
+      setResolveError(err.message || 'Unable to connect to registry. Backend may be waking up.');
+    } finally {
+      setIsResolving(false);
+    }
+  }, []);
+
+  // Fetch preset contact names from API on mount
+  useEffect(() => {
+    let isMounted = true;
+    Promise.all(
+      PRESET_CONTACTS.map(async (c) => {
+        try {
+          const res = await resolvePayee(c.accountId);
+          return { id: c.accountId, name: res.display_name || c.accountId };
+        } catch {
+          return { id: c.accountId, name: c.accountId };
+        }
+      })
+    ).then((results) => {
+      if (!isMounted) return;
+      const map: Record<string, string> = {};
+      results.forEach((r) => {
+        map[r.id] = r.name;
+      });
+      setPresetNames(map);
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Debounced resolution for payee handle changes
+  useEffect(() => {
+    const handle = (gatewayMode === 'simulated' ? toAccount : rzpPayeeId).trim();
+    if (!handle) {
+      setResolvedPayee(null);
+      setIsResolving(false);
+      setResolveError(null);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+      resolveTarget(handle);
+    }, 400);
+
+    return () => clearTimeout(timer);
+  }, [toAccount, rzpPayeeId, gatewayMode, resolveTarget]);
+
   const handleSwitchMode = (mode: 'simulated' | 'razorpay') => {
     setGatewayMode(mode);
     setStep('payee');
@@ -249,38 +319,43 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const handleSelectContact = (contact: PresetContact) => {
     if (gatewayMode === 'simulated') {
       setToAccount(contact.accountId);
-      setToDisplayName(contact.name);
     } else {
       setRzpPayeeId(contact.accountId);
-      setToDisplayName(contact.name);
     }
+    const resolvedName = presetNames[contact.accountId] || contact.accountId;
+    setToDisplayName(resolvedName);
     setErrorMessage(null);
+    resolveTarget(contact.accountId);
   };
 
   const handleUpiDecoded = (data: DecodedUpiData) => {
     if (gatewayMode === 'simulated') {
       setToAccount(data.pa);
-      setToDisplayName(data.pn || data.pa);
+      if (data.pn) {
+        setToDisplayName(data.pn);
+      }
       if (data.am) {
         setAmount(data.am);
       }
     } else {
       setRzpPayeeId(data.pa);
-      setToDisplayName(data.pn || data.pa);
+      if (data.pn) {
+        setToDisplayName(data.pn);
+      }
       if (data.am) {
         setRzpAmount(data.am);
       }
     }
     setShowQrScanner(false);
     setErrorMessage(null);
-    setStep('amount');
+    resolveTarget(data.pa);
   };
 
   const handleProceedToAmount = (e: React.FormEvent) => {
     e.preventDefault();
-    const payee = gatewayMode === 'simulated' ? toAccount : rzpPayeeId;
-    if (!payee.trim()) {
-      setErrorMessage('Please enter a recipient account ID or UPI ID.');
+    if (isResolving) return;
+    if (!resolvedPayee?.found) {
+      setErrorMessage('Please select or enter a recipient account found in the registry.');
       return;
     }
     setErrorMessage(null);
@@ -638,16 +713,14 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       id="payee-id"
                       type="text"
                       required
-                      placeholder="Enter account ID or UPI ID"
+                      placeholder="Enter account ID (e.g. ACC_0015) or UPI ID"
                       value={gatewayMode === 'simulated' ? toAccount : rzpPayeeId}
                       onChange={(e) => {
                         const val = e.target.value;
                         if (gatewayMode === 'simulated') {
                           setToAccount(val);
-                          setToDisplayName(val);
                         } else {
                           setRzpPayeeId(val);
-                          setToDisplayName(val);
                         }
                       }}
                       className="w-full pl-3 pr-10 py-2.5 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] font-mono text-[13px] text-[#1B2433] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8] transition-colors"
@@ -658,6 +731,75 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       </svg>
                     </div>
                   </div>
+
+                  {/* Payee Resolution Card / Loading / Error */}
+                  {isResolving && (
+                    <div className="mt-2.5 p-3 bg-[#F4F5F7] border border-[#DCE0E7] rounded-[8px] flex items-center gap-2.5 text-[12px] text-[#5B6575]">
+                      <svg className="w-4 h-4 animate-spin text-[#1F4FD8] flex-shrink-0" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                      </svg>
+                      <span>Resolving payee in simulated registry...</span>
+                    </div>
+                  )}
+
+                  {!isResolving && resolveError && (
+                    <div className="mt-2.5 p-3 bg-[#C0362C]/10 border border-[#C0362C]/20 rounded-[8px] flex items-center justify-between text-[12px] text-[#C0362C]">
+                      <div className="flex items-center gap-2 min-w-0 pr-2">
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <span className="truncate">{resolveError}</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => resolveTarget(gatewayMode === 'simulated' ? toAccount : rzpPayeeId)}
+                        className="px-2.5 py-1 text-[11px] font-semibold text-[#1F4FD8] bg-white border border-[#DCE0E7] rounded-[4px] hover:bg-[#EEF3FD] flex-shrink-0"
+                      >
+                        Retry
+                      </button>
+                    </div>
+                  )}
+
+                  {!isResolving && !resolveError && resolvedPayee && (
+                    resolvedPayee.found ? (
+                      <div className="mt-2.5 p-3 bg-[#EEF8F3] border border-[#13805B]/30 rounded-[8px] flex items-center justify-between">
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-8 h-8 rounded-full bg-[#13805B] text-white flex items-center justify-center font-semibold text-[12px] flex-shrink-0">
+                            {getInitials(resolvedPayee.display_name || resolvedPayee.handle)}
+                          </div>
+                          <div className="min-w-0">
+                            <div className="flex items-center gap-1.5 flex-wrap">
+                              <span className="text-[13px] font-semibold text-[#17202E] truncate">
+                                {resolvedPayee.display_name}
+                              </span>
+                              <span className="px-1.5 py-0.5 text-[10px] font-medium bg-[#13805B]/15 text-[#13805B] border border-[#13805B]/30 rounded-[4px] whitespace-nowrap">
+                                Simulated registry
+                              </span>
+                            </div>
+                            <div className="text-[11px] font-mono text-[#5E6B7D] truncate">
+                              {resolvedPayee.handle}
+                            </div>
+                          </div>
+                        </div>
+                        <div className="flex-shrink-0 ml-2 text-[#13805B]">
+                          <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="mt-2.5 p-3 bg-[#C0362C]/10 border border-[#C0362C]/20 rounded-[8px] flex items-center gap-2 text-[12px] text-[#C0362C]">
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <div>
+                          <span className="font-semibold">No account found</span>
+                          <span className="text-[11px] text-[#5E6B7D] ml-1.5">Please enter a valid simulated account ID or UPI handle.</span>
+                        </div>
+                      </div>
+                    )
+                  )}
                 </div>
 
                 {/* Demo Contacts List */}
@@ -670,6 +812,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     {PRESET_CONTACTS.map((contact) => {
                       const isSelected = (gatewayMode === 'simulated' ? toAccount : rzpPayeeId) === contact.accountId;
+                      const contactDisplayName = presetNames[contact.accountId] || contact.accountId;
                       return (
                         <button
                           key={contact.accountId}
@@ -682,11 +825,11 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                           }`}
                         >
                           <div className={`w-9 h-9 rounded-full text-white ${contact.avatarBg} flex items-center justify-center font-mono text-[12px] font-semibold flex-shrink-0`}>
-                            {getInitials(contact.name)}
+                            {getInitials(contactDisplayName)}
                           </div>
                           <div className="min-w-0 flex-1">
                             <div className="text-[13px] font-semibold text-[#1B2433] truncate flex items-center gap-1">
-                              <span>{contact.name}</span>
+                              <span>{contactDisplayName}</span>
                             </div>
                             <div className="text-[11px] font-mono text-[#5B6575] truncate">{contact.handle}</div>
                           </div>
@@ -699,7 +842,8 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 <div className="pt-2">
                   <button
                     type="submit"
-                    className="w-full min-h-[44px] py-2.5 px-4 bg-[#1F4FD8] text-[#FFFFFF] text-[14px] font-medium rounded-[6px] hover:bg-[#183EB0] transition-colors flex items-center justify-center gap-2"
+                    disabled={isResolving || !resolvedPayee?.found}
+                    className="w-full min-h-[44px] py-2.5 px-4 bg-[#1F4FD8] text-[#FFFFFF] text-[14px] font-medium rounded-[6px] hover:bg-[#183EB0] disabled:bg-[#D5DAE1] disabled:text-[#5E6B7D] disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                   >
                     <span>Proceed to Enter Amount</span>
                     <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>

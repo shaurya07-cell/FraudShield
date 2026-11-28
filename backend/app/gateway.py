@@ -60,6 +60,14 @@ class GatewayAccount(BaseModel):
     name: str
     balance: float
     status: str = "active"
+    holder_name: Optional[str] = None
+
+
+class ResolvePayeeResponse(BaseModel):
+    found: bool
+    handle: str
+    kind: Optional[str] = None  # "account" | "vpa" | None
+    display_name: Optional[str] = None
 
 
 class GatewayPaymentRecord(BaseModel):
@@ -101,6 +109,7 @@ class GatewayManager:
         self._lock = threading.Lock()
         self._accounts: Dict[str, GatewayAccount] = {}
         self._initial_accounts: Dict[str, GatewayAccount] = {}
+        self._vpa_map: Dict[str, str] = {}
         self._ledger: List[GatewayPaymentRecord] = []
         self._broadcast_callback: Optional[Callable[[Dict[str, Any]], Any]] = None
         self._seed_accounts()
@@ -113,6 +122,7 @@ class GatewayManager:
         """Seed 500 accounts ACC_0000 - ACC_0499 with deterministic balances."""
         rng = random.Random(42)
         accounts: Dict[str, GatewayAccount] = {}
+        self._vpa_map.clear()
 
         for i in range(500):
             acc_id = f"ACC_{i:04d}"
@@ -121,12 +131,65 @@ class GatewayManager:
             name = f"{first} {last}"
             # Balance between 5,000 and 200,000 INR
             balance = round(rng.uniform(5000.0, 200000.0), 2)
-            acc = GatewayAccount(id=acc_id, name=name, balance=balance, status="active")
+            acc = GatewayAccount(id=acc_id, name=name, balance=balance, status="active", holder_name=name)
             accounts[acc_id] = acc
+
+            # Map virtual handles
+            self._vpa_map[f"{acc_id.lower()}@upi"] = acc_id
+            self._vpa_map[f"{first.lower()}.{last.lower()}@upi"] = acc_id
 
         self._accounts = {k: v.model_copy() for k, v in accounts.items()}
         self._initial_accounts = {k: v.model_copy() for k, v in accounts.items()}
         self._ledger = []
+
+    def resolve_handle(self, handle: str) -> ResolvePayeeResponse:
+        """Resolve an account ID or VPA handle against registered accounts or test handles."""
+        raw = (handle or "").strip()
+        if not raw:
+            return ResolvePayeeResponse(found=False, handle=handle, kind=None, display_name=None)
+
+        if raw.lower() == "success@razorpay":
+            return ResolvePayeeResponse(
+                found=True,
+                handle="success@razorpay",
+                kind="vpa",
+                display_name="Razorpay test payee (test mode)",
+            )
+
+        with self._lock:
+            # Check direct account ID
+            acc = self._accounts.get(raw.upper())
+            if acc:
+                return ResolvePayeeResponse(
+                    found=True,
+                    handle=acc.id,
+                    kind="account",
+                    display_name=acc.holder_name or acc.name,
+                )
+
+            # Check VPA handle
+            if "@" in raw:
+                prefix = raw.split("@", 1)[0].upper()
+                acc_by_prefix = self._accounts.get(prefix)
+                if acc_by_prefix:
+                    return ResolvePayeeResponse(
+                        found=True,
+                        handle=raw,
+                        kind="vpa",
+                        display_name=acc_by_prefix.holder_name or acc_by_prefix.name,
+                    )
+
+                target_id = self._vpa_map.get(raw.lower())
+                if target_id and target_id in self._accounts:
+                    acc_by_vpa = self._accounts[target_id]
+                    return ResolvePayeeResponse(
+                        found=True,
+                        handle=raw,
+                        kind="vpa",
+                        display_name=acc_by_vpa.holder_name or acc_by_vpa.name,
+                    )
+
+        return ResolvePayeeResponse(found=False, handle=handle, kind=None, display_name=None)
 
     def reset(self) -> None:
         """Restore initial seeded account balances and clear the ledger."""
@@ -451,6 +514,12 @@ async def gateway_pay(req: GatewayPayRequest) -> GatewayPaymentResponse:
 def gateway_confirm(req: GatewayConfirmRequest) -> GatewayConfirmResponse:
     """Confirm a PENDING_VERIFICATION payment using the generated demo OTP code."""
     return GATEWAY.confirm_payment(req)
+
+
+@router.get("/resolve", response_model=ResolvePayeeResponse)
+def resolve_payee(handle: str = Query(..., description="Account ID or VPA handle")) -> ResolvePayeeResponse:
+    """Resolve an account ID or VPA handle against registered accounts or test handles."""
+    return GATEWAY.resolve_handle(handle)
 
 
 @router.get("/accounts/{account_id}", response_model=GatewayAccount)

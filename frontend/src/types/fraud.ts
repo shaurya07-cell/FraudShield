@@ -72,6 +72,14 @@ export interface GatewayAccount {
   name: string;
   balance: number;
   status: string;
+  holder_name?: string | null;
+}
+
+export interface ResolvePayeeResponse {
+  found: boolean;
+  handle: string;
+  kind?: 'account' | 'vpa' | null;
+  display_name?: string | null;
 }
 
 export interface GatewayPaymentRecord {
