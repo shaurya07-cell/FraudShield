@@ -63,6 +63,15 @@ export const ScenarioControls: React.FC<ScenarioControlsProps> = ({
           <button
             type="button"
             disabled={isRunning}
+            onClick={() => onRunScenario('bulk_payer', 'Bulk payer')}
+            className="px-3 py-1.5 min-h-[44px] text-[14px] font-medium text-[#1B2433] bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] hover:bg-[#F4F5F7] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          >
+            Bulk payer
+          </button>
+
+          <button
+            type="button"
+            disabled={isRunning}
             onClick={onReset}
             className="px-3 py-1.5 text-[14px] font-medium text-[#5B6575] hover:text-[#C0362C] hover:bg-[#F4F5F7] rounded-[6px] disabled:opacity-50 disabled:cursor-not-allowed transition-colors ml-1"
           >
@@ -77,6 +86,10 @@ export const ScenarioControls: React.FC<ScenarioControlsProps> = ({
           )}
           {statusMessage ? <span>{statusMessage}</span> : <span>Ready</span>}
         </div>
+      </div>
+
+      <div className="mt-2 text-[12px] text-[#5B6575]">
+        Bulk payer is a hard case: a new account paying many people looks like a cash-out. The system flags it for review.
       </div>
     </div>
   );

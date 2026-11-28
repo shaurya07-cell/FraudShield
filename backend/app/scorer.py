@@ -6,11 +6,92 @@ from typing import Dict, List, Optional
 
 from app.graph_engine import GLOBAL_GRAPH
 from app.metrics import METRICS
-from app.ml import extract_features, get_top_feature, is_model_loaded, predict_proba, FEATURE_NAMES
+from app.ml import extract_features, is_model_loaded, predict_proba, FEATURE_NAMES, GLOBAL_ML
 from app.models_ensemble import GLOBAL_ENSEMBLE
 from app.rules import evaluate, score_from_reasons
 from app.schemas import Reason, ScoredTransaction, Transaction
 from app.state import GLOBAL_STATE, EngineState
+
+
+FEATURE_LABELS = {
+    "amount": "Transaction amount",
+    "amount_ratio_to_sender_avg": "Amount ratio to historical average",
+    "sender_txn_count_1m": "1-minute transaction velocity",
+    "sender_txn_count_5m": "5-minute transaction velocity",
+    "sender_account_age_seconds": "Sender account age",
+    "sender_distinct_receivers_5m": "Distinct receivers fan-out (5m)",
+    "receiver_distinct_senders_5m": "Distinct senders fan-in (5m)",
+    "device_shared_accounts": "Accounts sharing device",
+    "is_round_trip": "Direct circular flow",
+    "in_cycle": "Closed cyclical loop",
+    "component_size": "Network cluster size",
+    "neighbor_avg_risk": "Neighbor average risk",
+    "sender_pagerank": "Sender network authority",
+    "receiver_pagerank": "Receiver network authority",
+    "sender_in_degree": "Sender inbound connections",
+    "sender_out_degree": "Sender outbound connections",
+    "receiver_in_degree": "Receiver inbound connections",
+    "receiver_out_degree": "Receiver outbound connections",
+    "receiver_account_age_seconds": "Receiver account age",
+}
+
+
+def _format_feature_val(fname: str, val: float) -> str:
+    """Format feature value into human-readable string."""
+    if fname == "amount":
+        return f"₹{val:,.2f}"
+    if "age_seconds" in fname:
+        return f"{int(val)}s"
+    if any(k in fname for k in ("count", "distinct", "shared", "in_degree", "out_degree")) or fname in (
+        "component_size",
+        "in_cycle",
+        "is_round_trip",
+    ):
+        return f"{int(val)}"
+    if "ratio" in fname:
+        return f"{val:.1f}x"
+    if "risk" in fname or "prob" in fname:
+        return f"{val:.1%}"
+    return f"{val:.2f}"
+
+
+def _compute_xgb_reasons(model, features: Dict[str, float], ensemble_score: int = 10) -> List[Reason]:
+    """Compute per-transaction ML_MODEL reason using XGBoost pred_contribs naming top 3 features with direction.
+
+    If contributions cannot be computed (e.g. model load failure or missing booster),
+    returns an empty list (omits reason, does not fabricate one).
+    """
+    if model is None or not hasattr(model, "get_booster"):
+        return []
+    try:
+        booster = model.get_booster()
+        vec = np.array([[features.get(f, 0.0) for f in FEATURE_NAMES]], dtype=np.float32)
+        dmatrix = xgb.DMatrix(vec, feature_names=FEATURE_NAMES)
+        contribs = booster.predict(dmatrix, pred_contribs=True)
+        contrib_vals = contribs[0][:-1]
+        top_idxs = np.argsort(-np.abs(contrib_vals))[:3]
+
+        driver_parts: List[str] = []
+        for idx in top_idxs:
+            fname = FEATURE_NAMES[idx]
+            fval = features.get(fname, 0.0)
+            contrib = float(contrib_vals[idx])
+            direction = "raises risk" if contrib > 0 else "lowers risk"
+            label = FEATURE_LABELS.get(fname, fname)
+            val_str = _format_feature_val(fname, fval)
+            driver_parts.append(f"{label} ({val_str}) {direction}")
+
+        detail = f"Top model drivers: {', '.join(driver_parts)}"
+        weight = max(1, int(round(0.6 * ensemble_score)))
+        return [
+            Reason(
+                rule="ML_MODEL",
+                detail=detail,
+                weight=weight,
+            )
+        ]
+    except Exception:
+        return []
 
 
 def score_transaction(
@@ -40,62 +121,10 @@ def score_transaction(
             )
             blended = int(round(0.4 * rule_score + 0.6 * ensemble_score))
             final_score = min(max(blended, 0), 100)
-            top_feature = get_top_feature(features)
-            meta_score = model_scores.get("meta", ensemble_score / 100.0) if model_scores else (ensemble_score / 100.0)
-            reasons.append(
-                Reason(
-                    rule="ML_MODEL",
-                    detail=f"Ensemble meta-score: {meta_score:.1%}, top driver: {top_feature}",
-                    weight=int(round(0.6 * ensemble_score)),
-                )
-            )
-            # Per-transaction feature contributions using XGBoost pred_contribs in plain language
-            if GLOBAL_ENSEMBLE.supervised_model is not None:
-                try:
-                    vec = np.array([[features.get(f, 0.0) for f in FEATURE_NAMES]], dtype=np.float32)
-                    if hasattr(GLOBAL_ENSEMBLE.supervised_model, "get_booster"):
-                        booster = GLOBAL_ENSEMBLE.supervised_model.get_booster()
-                        dmatrix = xgb.DMatrix(vec, feature_names=FEATURE_NAMES)
-                        contribs = booster.predict(dmatrix, pred_contribs=True)
-                        contrib_vals = contribs[0][:-1]
-                    else:
-                        contrib_vals = np.array([GLOBAL_ENSEMBLE.supervised_model.feature_importances_] * len(FEATURE_NAMES))[0]
 
-                    # Map top contributing features to clear human-readable explanations
-                    feature_explanations = {
-                        "amount": lambda v: f"Transaction amount ₹{v:,.2f} is higher than typical baseline",
-                        "amount_ratio_to_sender_avg": lambda v: f"Amount is {v:.1f}x higher than sender's historical average",
-                        "sender_txn_count_1m": lambda v: f"Rapid burst of {int(v)} transactions within 60 seconds",
-                        "sender_txn_count_5m": lambda v: f"Elevated velocity with {int(v)} transactions in past 5 minutes",
-                        "sender_account_age_seconds": lambda v: f"Account is brand new (created {int(v)}s ago)",
-                        "sender_distinct_receivers_5m": lambda v: f"Dispersing funds across {int(v)} distinct receivers rapidly",
-                        "receiver_distinct_senders_5m": lambda v: f"Receiver accumulating funds from {int(v)} distinct senders",
-                        "device_shared_accounts": lambda v: f"Device is shared across {int(v)} different accounts",
-                        "is_round_trip": lambda v: "Direct circular flow: money returned back to origin counterparty",
-                        "in_cycle": lambda v: "Participating in closed cyclical transaction loop (fraud ring)",
-                        "component_size": lambda v: f"Situated in dense transaction cluster of {int(v)} nodes",
-                        "neighbor_avg_risk": lambda v: f"Direct counterparties have elevated fraud risk ({v:.0%})",
-                        "sender_pagerank": lambda v: "Central authority hub in account network",
-                        "receiver_pagerank": lambda v: "High central network authority node",
-                    }
-
-                    top_idxs = np.argsort(-np.abs(contrib_vals))[:2]
-                    for idx in top_idxs:
-                        fname = FEATURE_NAMES[idx]
-                        fvalue = features.get(fname, 0.0)
-                        if fname in feature_explanations:
-                            expl_detail = feature_explanations[fname](fvalue)
-                        else:
-                            expl_detail = f"Feature '{fname}' (value {fvalue:.2f}) contributes to risk"
-                        reasons.append(
-                            Reason(
-                                rule="FEATURE_XGBOOST",
-                                detail=expl_detail,
-                                weight=1,
-                            )
-                        )
-                except Exception:
-                    pass
+            # Per-transaction feature contributions using XGBoost pred_contribs
+            xgb_reasons = _compute_xgb_reasons(GLOBAL_ENSEMBLE.supervised_model, features, ensemble_score=ensemble_score)
+            reasons.extend(xgb_reasons)
             reasons.extend(ensemble_reasons)
         except Exception:
             final_score = rule_score
@@ -106,14 +135,8 @@ def score_transaction(
             ml_score = int(round(ml_prob * 100))
             final_score = int(round(0.4 * rule_score + 0.6 * ml_score))
             final_score = min(max(final_score, 0), 100)
-            top_feature = get_top_feature(features)
-            reasons.append(
-                Reason(
-                    rule="ML_MODEL",
-                    detail=f"Predicted risk: {ml_prob:.1%}, top driver: {top_feature}",
-                    weight=int(round(0.6 * ml_score)),
-                )
-            )
+            xgb_reasons = _compute_xgb_reasons(GLOBAL_ML.model, features, ensemble_score=ml_score)
+            reasons.extend(xgb_reasons)
         except Exception:
             final_score = rule_score
 

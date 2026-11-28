@@ -5,6 +5,7 @@ import re
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import parse_qs, unquote, urlparse
 import uuid
 
 from fastapi import APIRouter, HTTPException, Query
@@ -16,6 +17,19 @@ from app.payment_flow import PAYMENT_FLOW, PaymentState
 
 
 # --- Pydantic Request & Response Models ---
+
+class ParseUpiQrRequest(BaseModel):
+    qr_content: str
+
+
+class ParseUpiQrResponse(BaseModel):
+    valid: bool
+    pa: Optional[str] = None
+    pn: Optional[str] = None
+    am: Optional[str] = None
+    raw: str
+    message: Optional[str] = None
+
 
 class GatewayPayRequest(BaseModel):
     from_account: str
@@ -126,28 +140,28 @@ LAST_NAMES = [
 ]
 
 COMMON_PSPS = {
-    "ptyes": "Paytm Payments Bank / YES Bank",
-    "paytm": "Paytm Payments Bank",
-    "okhdfcbank": "HDFC Bank UPI",
-    "hdfcbank": "HDFC Bank",
-    "okaxis": "Axis Bank UPI",
-    "axisbank": "Axis Bank",
-    "okicici": "ICICI Bank UPI",
-    "icici": "ICICI Bank",
-    "ibl": "ICICI Bank",
-    "oksbi": "State Bank of India UPI",
-    "sbi": "State Bank of India",
-    "ybl": "YES Bank UPI",
-    "upi": "NPCI BHIM / UPI",
-    "apl": "Amazon Pay UPI",
-    "fbl": "Federal Bank UPI",
-    "kotak": "Kotak Mahindra Bank",
-    "pnb": "Punjab National Bank",
-    "barodampay": "Bank of Baroda",
-    "idfcbank": "IDFC FIRST Bank",
-    "indus": "IndusInd Bank",
-    "freecharge": "Axis Bank (Freecharge)",
-    "mobikwik": "MobiKwik UPI",
+    "ptyes": "UPI Member Bank",
+    "paytm": "UPI Member Bank",
+    "okhdfcbank": "UPI Member Bank",
+    "hdfcbank": "UPI Member Bank",
+    "okaxis": "UPI Member Bank",
+    "axisbank": "UPI Member Bank",
+    "okicici": "UPI Member Bank",
+    "icici": "UPI Member Bank",
+    "ibl": "UPI Member Bank",
+    "oksbi": "UPI Member Bank",
+    "sbi": "UPI Member Bank",
+    "ybl": "UPI Member Bank",
+    "upi": "UPI Switch",
+    "apl": "UPI Member Bank",
+    "fbl": "UPI Member Bank",
+    "kotak": "UPI Member Bank",
+    "pnb": "UPI Member Bank",
+    "barodampay": "UPI Member Bank",
+    "idfcbank": "UPI Member Bank",
+    "indus": "UPI Member Bank",
+    "freecharge": "UPI Member Bank",
+    "mobikwik": "UPI Member Bank",
 }
 
 KNOWN_NAMES_BY_PHONE: Dict[str, str] = {}  # no real identifiers in code
@@ -214,7 +228,7 @@ class GatewayManager:
     """Thread-safe manager for seeded accounts and payment ledger."""
 
     def __init__(self):
-        self._lock = threading.Lock()
+        self._lock = threading.RLock()
         self._accounts: Dict[str, GatewayAccount] = {}
         self._initial_accounts: Dict[str, GatewayAccount] = {}
         self._vpa_map: Dict[str, str] = {}
@@ -333,7 +347,7 @@ class GatewayManager:
                     display_name=acc.holder_name or acc.name,
                     account_id=acc.id,
                     vpa=f"{acc.id.lower()}@upi",
-                    bank_name="FraudShield Federal Bank",
+                    bank_name="UPI Member Bank",
                     verification="simulated_registry",
                 )
 
@@ -373,7 +387,7 @@ class GatewayManager:
                         display_name=acc_by_prefix.holder_name or acc_by_prefix.name,
                         account_id=acc_by_prefix.id,
                         vpa=raw,
-                        bank_name=COMMON_PSPS.get(psp_clean, "FraudShield Federal Bank"),
+                        bank_name=COMMON_PSPS.get(psp_clean, "UPI Member Bank"),
                         verification="simulated_registry",
                     )
 
@@ -575,11 +589,15 @@ class GatewayManager:
 
             if receiver:
                 receiver_account_id = receiver.id
+            elif is_valid_vpa(req.to_account):
+                # Valid external VPA, not seeded in internal accounts
+                receiver = None
+                receiver_account_id = None
 
             validation_error = None
             if not sender:
                 validation_error = f"Sender account '{req.from_account}' does not exist."
-            elif not receiver:
+            elif not receiver and not is_valid_vpa(req.to_account):
                 validation_error = f"Recipient account '{req.to_account}' does not exist."
             elif req.from_account == req.to_account:
                 validation_error = "Sender and recipient accounts cannot be identical."
@@ -669,7 +687,7 @@ class GatewayManager:
         with self._lock:
             # Re-fetch under lock
             sender = self._accounts[req.from_account]
-            receiver = self._accounts[receiver_account_id]
+            receiver = self._accounts.get(receiver_account_id) if receiver_account_id else None
             status = "FAILED"
             sender_balance_after = sender.balance
             receiver_balance_after = None
@@ -687,9 +705,12 @@ class GatewayManager:
                 # Check sufficient funds before debit
                 if sender.balance >= amt:
                     sender.balance = round(sender.balance - amt, 2)
-                    receiver.balance = round(receiver.balance + amt, 2)
+                    if receiver:
+                        receiver.balance = round(receiver.balance + amt, 2)
+                        receiver_balance_after = receiver.balance
+                    else:
+                        receiver_balance_after = None
                     sender_balance_after = sender.balance
-                    receiver_balance_after = receiver.balance
                     status = "SUCCESS"
                     message = "Payment approved and processed successfully."
                     flow_rec.transition_to(PaymentState.SUCCESS, message=message)
@@ -779,13 +800,22 @@ class GatewayManager:
             if req.otp.strip() == payment.demo_otp:
                 # Check balance is still sufficient
                 sender = self._accounts.get(payment.from_account)
-                receiver = self._accounts.get(payment.to_account)
+                receiver = (
+                    self._accounts.get(payment.to_account)
+                    or (self._vpa_map.get(payment.to_account.lower()) and self._accounts.get(self._vpa_map.get(payment.to_account.lower())))
+                )
 
-                if not sender or not receiver:
+                if not sender:
                     payment.status = "FAILED"
                     if flow_rec:
-                        flow_rec.transition_to(PaymentState.FAILED, message="Associated accounts no longer active.")
-                    raise HTTPException(status_code=400, detail="Associated accounts no longer active.")
+                        flow_rec.transition_to(PaymentState.FAILED, message="Sender account no longer active.")
+                    raise HTTPException(status_code=400, detail="Sender account no longer active.")
+
+                if not receiver and not is_valid_vpa(payment.to_account):
+                    payment.status = "FAILED"
+                    if flow_rec:
+                        flow_rec.transition_to(PaymentState.FAILED, message="Recipient account no longer active.")
+                    raise HTTPException(status_code=400, detail="Recipient account no longer active.")
 
                 if sender.balance < payment.amount:
                     payment.status = "FAILED"
@@ -798,18 +828,23 @@ class GatewayManager:
                         status="FAILED",
                         message=msg,
                         sender_balance_after=sender.balance,
-                        receiver_balance_after=receiver.balance,
+                        receiver_balance_after=receiver.balance if receiver else None,
                     )
 
                 # Move the money
                 sender.balance = round(sender.balance - payment.amount, 2)
-                receiver.balance = round(receiver.balance + payment.amount, 2)
+                if receiver:
+                    receiver.balance = round(receiver.balance + payment.amount, 2)
+                    receiver_balance_after = receiver.balance
+                else:
+                    receiver_balance_after = None
+
                 payment.status = "SUCCESS"
                 succ_msg = "Verification code confirmed. Payment processed successfully."
                 if flow_rec:
                     flow_rec.transition_to(PaymentState.SUCCESS, message=succ_msg)
                     flow_rec.sender_balance_after = sender.balance
-                    flow_rec.receiver_balance_after = receiver.balance
+                    flow_rec.receiver_balance_after = receiver_balance_after
 
                 return GatewayConfirmResponse(
                     payment_id=payment.payment_id,
@@ -817,7 +852,7 @@ class GatewayManager:
                     status="SUCCESS",
                     message=succ_msg,
                     sender_balance_after=sender.balance,
-                    receiver_balance_after=receiver.balance,
+                    receiver_balance_after=receiver_balance_after,
                 )
             else:
                 payment.failed_otp_attempts += 1
@@ -934,10 +969,59 @@ def get_payment_receipt(ref: str) -> Dict[str, Any]:
 
     payer = GATEWAY.get_account(flow.from_account)
     payee = GATEWAY.get_account(flow.to_account)
-    payer_name = payer.name if payer else "Simulated Payer"
-    payee_name = payee.name if payee else "Simulated Payee"
+    payer_name = payer.name if payer else flow.from_account
+    payee_name = payee.name if payee else flow.to_account
 
     return PAYMENT_FLOW.build_receipt(flow, payer_name=payer_name, payee_name=payee_name)
+
+
+def parse_upi_qr_string(raw: str) -> ParseUpiQrResponse:
+    """Safely parse upi://pay?pa=&pn=&am= ignoring any unknown parameters."""
+    if not raw or not isinstance(raw, str):
+        return ParseUpiQrResponse(valid=False, raw=str(raw or ""), message="Empty QR content.")
+
+    trimmed = raw.strip()
+    if not trimmed.lower().startswith("upi://pay"):
+        return ParseUpiQrResponse(valid=False, raw=trimmed, message="Invalid URI scheme; expected upi://pay.")
+
+    parsed = urlparse(trimmed)
+    qs = parse_qs(parsed.query)
+
+    pa_list = qs.get("pa", [])
+    if not pa_list or not pa_list[0].strip():
+        return ParseUpiQrResponse(valid=False, raw=trimmed, message="Missing required 'pa' parameter.")
+
+    pa = unquote(pa_list[0].strip())
+    if not is_valid_vpa(pa):
+        return ParseUpiQrResponse(valid=False, raw=trimmed, message=f"Invalid VPA format: '{pa}'.")
+
+    pn_list = qs.get("pn", [])
+    pn = unquote(pn_list[0].strip()) if pn_list and pn_list[0].strip() else None
+
+    am_list = qs.get("am", [])
+    am = None
+    if am_list and am_list[0].strip():
+        try:
+            val = float(am_list[0].strip())
+            if val > 0:
+                am = f"{val:.2f}"
+        except ValueError:
+            pass
+
+    return ParseUpiQrResponse(
+        valid=True,
+        pa=pa,
+        pn=pn,
+        am=am,
+        raw=trimmed,
+        message="UPI QR parsed successfully.",
+    )
+
+
+@router.post("/parse-upi-qr", response_model=ParseUpiQrResponse)
+def parse_upi_qr_endpoint(req: ParseUpiQrRequest) -> ParseUpiQrResponse:
+    """Parse upi://pay?pa=&pn=&am= safely, ignoring unknown parameters."""
+    return parse_upi_qr_string(req.qr_content)
 
 
 @router.post("/reset")

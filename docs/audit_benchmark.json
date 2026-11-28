@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp_utc": "2026-11-28T02:27:44.981068+00:00",
+    "timestamp_utc": "2026-11-28T05:16:25.039795+00:00",
     "python_version": "3.14.6 (tags/v3.14.6:c63aec6, Jun 10 2026, 10:26:10) [MSC v.1944 64 bit (AMD64)]",
     "platform": "Windows-11-10.0.26300-SP0",
     "libraries": {
@@ -16,82 +16,82 @@
     "transactions_tested": 2000,
     "warmup_transactions": 200,
     "total_pipeline_ms": {
-      "mean": 7.658,
-      "p50": 7.009,
-      "p95": 11.231,
-      "p99": 12.852,
-      "max": 74.327
+      "mean": 7.29,
+      "p50": 6.709,
+      "p95": 10.609,
+      "p99": 11.724,
+      "max": 70.764
     },
     "stage_breakdown_ms": {
       "rules": {
-        "mean": 0.122,
-        "p50": 0.093,
-        "p95": 0.314,
-        "p99": 0.436,
-        "max": 0.691
+        "mean": 0.124,
+        "p50": 0.094,
+        "p95": 0.321,
+        "p99": 0.433,
+        "max": 0.716
       },
       "graph_cache": {
         "mean": 0.001,
         "p50": 0.001,
         "p95": 0.002,
         "p99": 0.002,
-        "max": 0.012
+        "max": 0.011
       },
       "feature_extraction": {
-        "mean": 0.068,
-        "p50": 0.048,
-        "p95": 0.178,
-        "p99": 0.265,
-        "max": 2.069
+        "mean": 0.065,
+        "p50": 0.046,
+        "p95": 0.177,
+        "p99": 0.241,
+        "max": 0.601
       },
       "model_supervised_xgb": {
-        "mean": 0.546,
-        "p50": 0.486,
-        "p95": 0.874,
-        "p99": 1.218,
-        "max": 7.801
+        "mean": 0.489,
+        "p50": 0.442,
+        "p95": 0.755,
+        "p99": 1.008,
+        "max": 1.363
       },
       "model_anomaly_iforest": {
-        "mean": 3.745,
-        "p50": 3.409,
-        "p95": 5.564,
-        "p99": 6.158,
-        "max": 17.614
+        "mean": 3.664,
+        "p50": 3.309,
+        "p95": 5.411,
+        "p99": 5.958,
+        "max": 67.186
       },
       "model_behaviour_profile": {
-        "mean": 0.011,
-        "p50": 0.012,
-        "p95": 0.024,
-        "p99": 0.027,
-        "max": 0.055
+        "mean": 0.009,
+        "p50": 0.011,
+        "p95": 0.02,
+        "p99": 0.023,
+        "max": 0.039
       },
       "model_graph_topological": {
-        "mean": 0.578,
-        "p50": 0.54,
-        "p95": 0.861,
-        "p99": 1.285,
-        "max": 3.371
+        "mean": 0.515,
+        "p50": 0.475,
+        "p95": 0.755,
+        "p99": 1.002,
+        "max": 5.575
       },
       "model_device_identity": {
-        "mean": 0.457,
-        "p50": 0.371,
-        "p95": 0.705,
-        "p99": 1.102,
-        "max": 67.358
+        "mean": 0.395,
+        "p50": 0.342,
+        "p95": 0.591,
+        "p99": 0.963,
+        "max": 7.584
       },
       "model_mule_tracker": {
         "mean": 0.002,
         "p50": 0.002,
         "p95": 0.003,
-        "p99": 0.004,
-        "max": 0.015
+        "p99": 0.003,
+        "max": 0.01
       },
       "meta_learner": {
-        "mean": 2.09,
-        "p50": 1.885,
-        "p95": 3.083,
-        "p99": 3.47,
-        "max": 16.09
+        "mean": 1.993,
+        "p50": 1.811,
+        "p95": 2.957,
+        "p99": 3.297,
+        "max": 6.172
       }
     }
   },
@@ -99,11 +99,11 @@
     "requests_sent": 300,
     "requests_successful": 300,
     "http_latency_ms": {
-      "mean": 19.533,
-      "p50": 19.155,
-      "p95": 23.924,
-      "p99": 31.267,
-      "max": 34.198
+      "mean": 16.519,
+      "p50": 15.698,
+      "p95": 21.183,
+      "p99": 22.797,
+      "max": 29.537
     }
   },
   "graph_scale_and_ring_detection": {
@@ -112,38 +112,38 @@
         "actual_nodes": 1000,
         "actual_edges": 2033,
         "full_pipeline_latency_ms": {
-          "mean": 10.188,
-          "p50": 9.504,
-          "p95": 13.555,
-          "p99": 14.444,
-          "max": 14.63
+          "mean": 7.633,
+          "p50": 7.463,
+          "p95": 8.871,
+          "p99": 9.551,
+          "max": 9.89
         }
       },
       "nodes_2500": {
         "actual_nodes": 2500,
         "actual_edges": 5124,
         "full_pipeline_latency_ms": {
-          "mean": 11.075,
-          "p50": 11.923,
-          "p95": 13.736,
-          "p99": 14.006,
-          "max": 14.141
+          "mean": 7.667,
+          "p50": 7.602,
+          "p95": 8.829,
+          "p99": 9.338,
+          "max": 9.396
         }
       },
       "nodes_5000": {
         "actual_nodes": 4998,
         "actual_edges": 10158,
         "full_pipeline_latency_ms": {
-          "mean": 8.242,
-          "p50": 8.041,
-          "p95": 9.683,
-          "p99": 11.113,
-          "max": 11.428
+          "mean": 7.066,
+          "p50": 6.908,
+          "p95": 7.864,
+          "p99": 8.811,
+          "max": 8.919
         }
       }
     },
     "ring_injection_test": {
-      "code_path": "app.graph_engine.GraphEngine.recompute_cache -> nx.strongly_connected_components(self.graph) [filters SCC with len >= 2 or self-loops, scores by max/avg node risk]",
+      "code_path": "app.graph_engine.GraphEngine.recompute_cache -> bounded cycles of length 3-8 on risk-filtered subgraph (risk >= 0.30), ring size cap 10 (oversized components -> dense_clusters)",
       "members_injected": 8,
       "members_found": 7,
       "total_detected_in_all_rings": 7,
@@ -172,48 +172,48 @@
       "allowed": 0,
       "total_flagged": 15,
       "flagged_percent": 100.0,
-      "mean_score": 77.5,
-      "max_score": 86
+      "mean_score": 84.1,
+      "max_score": 96
     },
     "ring_attack": {
       "total_transactions": 15,
-      "blocked": 6,
-      "reviewed": 5,
+      "blocked": 10,
+      "reviewed": 1,
       "allowed": 4,
       "total_flagged": 11,
       "flagged_percent": 73.3,
-      "mean_score": 53.7,
-      "max_score": 82
+      "mean_score": 64.9,
+      "max_score": 94
     },
     "fanout_cashout": {
       "total_transactions": 16,
-      "blocked": 3,
-      "reviewed": 4,
-      "allowed": 9,
-      "total_flagged": 7,
-      "flagged_percent": 43.8,
-      "mean_score": 47.8,
-      "max_score": 74
+      "blocked": 5,
+      "reviewed": 3,
+      "allowed": 8,
+      "total_flagged": 8,
+      "flagged_percent": 50.0,
+      "mean_score": 53.4,
+      "max_score": 86
     }
   },
   "false_positive_rates": {
     "cold_start_after_reset": {
       "transactions_tested": 200,
-      "review_count": 1,
+      "review_count": 0,
       "block_count": 0,
-      "total_false_positives": 1,
-      "false_positive_rate_percent": 0.5,
-      "mean_score": 1.55,
-      "max_score": 58
+      "total_false_positives": 0,
+      "false_positive_rate_percent": 0.0,
+      "mean_score": 1.45,
+      "max_score": 37
     },
     "warmed_baseline_after_500_txns": {
       "transactions_tested": 200,
-      "review_count": 6,
-      "block_count": 0,
-      "total_false_positives": 6,
-      "false_positive_rate_percent": 3.0,
-      "mean_score": 3.64,
-      "max_score": 67
+      "review_count": 11,
+      "block_count": 1,
+      "total_false_positives": 12,
+      "false_positive_rate_percent": 6.0,
+      "mean_score": 6.04,
+      "max_score": 78
     }
   }
 }

@@ -28,6 +28,7 @@ class AccountState:
         "total_sent_amount",
         "sent_window",
         "received_window",
+        "received_amounts",
         "receivers",
     )
 
@@ -40,6 +41,8 @@ class AccountState:
         self.sent_window: deque[Tuple[float, float]] = deque()
         # deque of (timestamp, sender_id) for received txns (pruned to 5 min window)
         self.received_window: deque[Tuple[float, str]] = deque()
+        # deque of (timestamp, amount) for received amounts (pruned to 5 min window)
+        self.received_amounts: deque[Tuple[float, float]] = deque()
         # set of all distinct receivers sent to
         self.receivers: Set[str] = set()
 
@@ -58,6 +61,8 @@ class AccountState:
         received_cutoff = current_time - 300.0
         while self.received_window and self.received_window[0][0] < received_cutoff:
             self.received_window.popleft()
+        while self.received_amounts and self.received_amounts[0][0] < received_cutoff:
+            self.received_amounts.popleft()
 
 
 class EngineState:
@@ -113,6 +118,7 @@ class EngineState:
             receiver_acc = self.get_or_create_account(txn.receiver_id, current_time)
             receiver_acc.prune(current_time)
             receiver_acc.received_window.append((current_time, txn.sender_id))
+            receiver_acc.received_amounts.append((current_time, txn.amount))
 
             # Device and IP maps
             self.device_accounts[txn.device_id].add(txn.sender_id)

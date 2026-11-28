@@ -12,7 +12,7 @@ def score_from_reasons(reasons: List[Reason]) -> int:
 
 
 def evaluate(txn: Transaction, state: Optional[EngineState] = None) -> List[Reason]:
-    """Evaluate all 7 fraud rules against in-memory state and update state."""
+    """Evaluate all fraud rules against in-memory state and update state."""
     if state is None:
         state = GLOBAL_STATE
 
@@ -122,6 +122,54 @@ def evaluate(txn: Transaction, state: Optional[EngineState] = None) -> List[Reas
                 Reason(
                     rule="STRUCTURING",
                     detail=f"Sender {txn.sender_id} made {structuring_count} txns between 4500 and 5000 in 10m (threshold >= 3)",
+                    weight=25,
+                )
+            )
+
+        # 8. RAPID_PASSTHROUGH: sender received funds in the last 5 minutes and is rapidly routing
+        # them out with pass-through ratio >= 70% and material sum >= 3000 (weight 30)
+        if sender_acc is not None:
+            cutoff_300s = current_time - 300.0
+            recent_received = 0.0
+            for t_stamp, amt in reversed(sender_acc.received_amounts):
+                if t_stamp >= cutoff_300s:
+                    recent_received += amt
+                else:
+                    break
+
+            if recent_received >= 3000.0:
+                # Calculate recent sent in same window including current txn
+                recent_sent = txn.amount
+                for t_stamp, amt in reversed(sender_acc.sent_window):
+                    if t_stamp >= cutoff_300s:
+                        recent_sent += amt
+                    else:
+                        break
+                pass_through_ratio = recent_sent / recent_received
+                if pass_through_ratio >= 0.70:
+                    reasons.append(
+                        Reason(
+                            rule="RAPID_PASSTHROUGH",
+                            detail=(
+                                f"Sender {txn.sender_id} received ₹{recent_received:.2f} within 5m "
+                                f"and is rapidly routing {pass_through_ratio:.0%} onward (threshold >= 70%)"
+                            ),
+                            weight=30,
+                        )
+                    )
+
+        # 9. FAN_OUT: sender dispersing funds to 6 or more distinct receivers in 5 minutes (weight 25)
+        distinct_receivers = {txn.receiver_id}
+        sender_pairs = state.pair_graph.get(txn.sender_id, {})
+        cutoff_300s = current_time - 300.0
+        for rec_id, last_t in sender_pairs.items():
+            if last_t >= cutoff_300s:
+                distinct_receivers.add(rec_id)
+        if len(distinct_receivers) >= 6:
+            reasons.append(
+                Reason(
+                    rule="FAN_OUT",
+                    detail=f"Sender {txn.sender_id} sent to {len(distinct_receivers)} distinct receivers in 5m (threshold >= 6)",
                     weight=25,
                 )
             )

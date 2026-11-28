@@ -421,3 +421,153 @@ def test_payment_to_registered_phone_succeeds():
     assert res.status_code == 200
     assert res.json()["status"] == "SUCCESS"
     assert res.json()["sender_balance_after"] == round(sender_init - 500.0, 2)
+
+
+def test_payment_to_external_vpa_allowed_succeeds():
+    """Payment to a format-valid external VPA succeeds on ALLOW with sender balance debited and receiver_balance_after None."""
+    client.post("/reset")
+    sender_init = client.get("/gateway/accounts/ACC_0010").json()["balance"]
+    res = client.post("/gateway/pay", json={
+        "from_account": "ACC_0010",
+        "to_account": "merchant@upi",
+        "amount": 250.0,
+        "note": "Payment to external UPI ID",
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "SUCCESS"
+    assert data["decision"] == "ALLOW"
+    assert data["sender_balance_after"] == round(sender_init - 250.0, 2)
+    assert data["receiver_balance_after"] is None
+    assert data["reference_id"] is not None
+
+    # Verify receipt can be retrieved for external VPA payment
+    receipt_res = client.get(f"/gateway/payments/{data['reference_id']}/receipt")
+    assert receipt_res.status_code == 200
+    rcp = receipt_res.json()
+    assert rcp["payee"]["account_id"] == "merchant@upi"
+
+
+def test_payment_to_external_vpa_blocked_declined():
+    """Payment to external VPA from a high-risk flagged sender is DECLINED with balances untouched."""
+    client.post("/reset")
+    client.post("/simulate/velocity_attack")
+    recent = client.get("/transactions/recent").json()
+    flagged_sender = recent[0]["sender_id"]
+
+    sender_init = client.get(f"/gateway/accounts/{flagged_sender}").json()["balance"]
+    res = client.post("/gateway/pay", json={
+        "from_account": flagged_sender,
+        "to_account": "externalpayee@upi",
+        "amount": 4900.0,
+    })
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "DECLINED"
+    assert data["decision"] == "BLOCK"
+    assert data["sender_balance_after"] == sender_init
+
+    sender_after = client.get(f"/gateway/accounts/{flagged_sender}").json()["balance"]
+    assert sender_after == sender_init
+
+
+def test_payment_to_external_vpa_review_requires_otp_and_settles():
+    """Payment to external VPA in REVIEW requires OTP, and confirming OTP debits sender with receiver_balance_after None."""
+    client.post("/reset")
+    sender_init = client.get("/gateway/accounts/ACC_0405").json()["balance"]
+    transfer_amount = 4950.0
+
+    res = client.post("/gateway/pay", json={
+        "from_account": "ACC_0405",
+        "to_account": "suspicious@upi",
+        "amount": transfer_amount,
+    })
+    assert res.status_code == 200
+    pay_data = res.json()
+    assert pay_data["decision"] == "REVIEW"
+    assert pay_data["status"] == "PENDING_VERIFICATION"
+    assert pay_data["demo_otp"] is not None
+    assert len(pay_data["demo_otp"]) == 6
+
+    # Sender balance unchanged while pending
+    s_pending = client.get("/gateway/accounts/ACC_0405").json()["balance"]
+    assert s_pending == sender_init
+
+    # Confirm OTP
+    confirm_res = client.post("/gateway/confirm", json={
+        "payment_id": pay_data["payment_id"],
+        "otp": pay_data["demo_otp"],
+    })
+    assert confirm_res.status_code == 200
+    confirm_data = confirm_res.json()
+    assert confirm_data["status"] == "SUCCESS"
+    assert confirm_data["sender_balance_after"] == round(sender_init - transfer_amount, 2)
+    assert confirm_data["receiver_balance_after"] is None
+
+    # Check updated balance in accounts
+    s_after = client.get("/gateway/accounts/ACC_0405").json()["balance"]
+    assert s_after == round(sender_init - transfer_amount, 2)
+
+
+def test_payment_to_malformed_vpa_rejected():
+    """Payment to a malformed VPA is immediately rejected with status FAILED without running fraud check."""
+    client.post("/reset")
+    sender_init = client.get("/gateway/accounts/ACC_0010").json()["balance"]
+
+    for bad_vpa in ["notanemail", "bad@@upi", "a@b", "user@"]:
+        res = client.post("/gateway/pay", json={
+            "from_account": "ACC_0010",
+            "to_account": bad_vpa,
+            "amount": 100.0,
+        })
+        assert res.status_code == 200
+        data = res.json()
+        assert data["status"] == "FAILED"
+        assert data["decision"] is None
+        assert data["fraud_check_ms"] == 0.0
+        assert "does not exist" in data["message"]
+
+    sender_after = client.get("/gateway/accounts/ACC_0010").json()["balance"]
+    assert sender_after == sender_init
+
+
+def test_parse_upi_qr_with_pn():
+    """Verify POST /gateway/parse-upi-qr extracts pa, pn, and am safely, ignoring unknown parameters."""
+    qr_payload = "upi://pay?pa=store@upi&pn=Retail%20Store&am=250.00&mc=5411&tr=TX123456"
+    res = client.post("/gateway/parse-upi-qr", json={"qr_content": qr_payload})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["valid"] is True
+    assert data["pa"] == "store@upi"
+    assert data["pn"] == "Retail Store"
+    assert data["am"] == "250.00"
+
+
+def test_parse_upi_qr_without_pn():
+    """Verify POST /gateway/parse-upi-qr parses QR with pa and am without pn."""
+    qr_payload = "upi://pay?pa=seller@bank&am=100.00"
+    res = client.post("/gateway/parse-upi-qr", json={"qr_content": qr_payload})
+    assert res.status_code == 200
+    data = res.json()
+    assert data["valid"] is True
+    assert data["pa"] == "seller@bank"
+    assert data["pn"] is None
+    assert data["am"] == "100.00"
+
+
+def test_parse_upi_qr_malformed():
+    """Verify POST /gateway/parse-upi-qr returns valid=False for malformed QRs and invalid VPAs."""
+    bad_payloads = [
+        "https://example.com/pay",
+        "upi://notpay?pa=store@upi",
+        "upi://pay?pn=StoreOnly",
+        "upi://pay?pa=not_a_vpa",
+        "not a url at all",
+        "",
+    ]
+    for bad in bad_payloads:
+        res = client.post("/gateway/parse-upi-qr", json={"qr_content": bad})
+        assert res.status_code == 200
+        data = res.json()
+        assert data["valid"] is False
+

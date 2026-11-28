@@ -288,8 +288,9 @@ def benchmark_graph_scale() -> Dict[str, Any]:
         print(f"   Checkpoint {cp} nodes: graph size={len(GLOBAL_GRAPH.graph.nodes)} nodes / {len(GLOBAL_GRAPH.graph.edges)} edges | full pipeline mean={res_pct['mean']} ms, p50={res_pct['p50']} ms, p95={res_pct['p95']} ms, p99={res_pct['p99']} ms, max={res_pct['max']} ms")
 
     # Code path disclosure for ring detection
-    ring_detection_code_path = "app.graph_engine.GraphEngine.recompute_cache -> nx.strongly_connected_components(self.graph) [filters SCC with len >= 2 or self-loops, scores by max/avg node risk]"
+    ring_detection_code_path = "app.graph_engine.GraphEngine.recompute_cache -> bounded cycles of length 3-8 on risk-filtered subgraph (risk >= 0.30), ring size cap 10 (oversized components -> dense_clusters)"
     print(f"\n   [Ring Detection Code Path]: {ring_detection_code_path}")
+    print("   [Note]: Test is easy by construction: ring edges risk 0.85-0.90 vs background 0.01-0.20, filter threshold 0.30")
 
     # Inject an 8-member cash-out ring
     ring_members = [f"RING_INJECT_{i:02d}" for i in range(8)]

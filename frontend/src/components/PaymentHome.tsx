@@ -24,11 +24,11 @@ interface PaymentHomeProps {
   onBackToDashboard: () => void;
 }
 
-const DEMO_CONTACTS = [
-  { handle: 'ACC_0015', id: 'ACC_0015', tag: 'Demo Receiver' },
-  { handle: 'ACC_0042', id: 'ACC_0042', tag: 'Demo Receiver' },
+const SAVED_CONTACTS = [
+  { handle: 'ACC_0015', id: 'ACC_0015', tag: 'Beneficiary' },
+  { handle: 'ACC_0042', id: 'ACC_0042', tag: 'Beneficiary' },
   { handle: 'success@razorpay', id: 'success@razorpay', tag: 'Test mode' },
-  { handle: 'ACC_0120', id: 'ACC_0120', tag: 'Demo Receiver' },
+  { handle: 'ACC_0120', id: 'ACC_0120', tag: 'Beneficiary' },
 ];
 
 export const PaymentHome: React.FC<PaymentHomeProps> = ({
@@ -62,7 +62,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
       });
 
     Promise.all(
-      DEMO_CONTACTS.map(async (c) => {
+      SAVED_CONTACTS.map(async (c) => {
         try {
           const res = await resolvePayee(c.id);
           return { id: c.id, name: res.display_name || c.id };
@@ -120,7 +120,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
     ...rzpPayments.map((p) => ({
       id: p.order_id,
       type: 'razorpay' as const,
-      from: senderAccount?.id || 'Demo',
+      from: senderAccount?.id || 'Account',
       to: 'Test Payee',
       amount: p.amount,
       status: p.status,
@@ -152,15 +152,14 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
               <div>
                 <div className="text-[17px] font-semibold text-[#1B2433]">{senderAccount?.name || '—'}</div>
                 <div className="text-[12px] font-mono text-[#5B6575]">Account ID: {senderAccount?.id || '—'}</div>
-                <div className="text-[11px] text-[#5B6575] mt-0.5">Demo account · For testing only</div>
               </div>
             </div>
 
             {/* Debit Card */}
             <div className="p-4 bg-gradient-to-r from-[#17202E] to-[#1F2D42] rounded-[8px] text-white shadow-sm space-y-3">
               <div className="flex items-center justify-between text-[11px] text-white/70">
-                <span className="font-semibold tracking-wider text-white">FRAUDSHIELD DEMO CARD</span>
-                <span className="font-mono text-white/60">DEMO ACCOUNT</span>
+                <span className="font-semibold tracking-wider text-white">FRAUDSHIELD PAYMENT CARD</span>
+                <span className="font-mono text-white/60">PRIMARY ACCOUNT</span>
               </div>
               <div className="text-[18px] font-mono tracking-widest text-white/90">
                 •••• •••• •••• {senderAccount?.id ? senderAccount.id.slice(-4) : '—'}
@@ -180,7 +179,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
             </div>
 
             <div className="mt-4 pt-3 border-t border-[#E3E7EE] text-[11px] text-[#5B6575] text-center">
-              Demo accounts · Account names and balances are demo data.
+              Test environment, no real money
             </div>
           </div>
         </div>
@@ -270,12 +269,12 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
               </div>
               <div>
                 <span className="font-semibold text-[16px] text-white tracking-tight">FraudShield Pay</span>
-                <div className="text-[10px] text-white/60">Demo Payment Interface</div>
+                <div className="text-[10px] text-white/60">Instant Payment Interface</div>
               </div>
             </div>
             <div className="flex items-center gap-1 px-2.5 py-0.5 bg-white/10 rounded-full text-white/80 text-[11px] font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-[#1E8E5A]" />
-              <span>Demo Rail</span>
+              <span>Direct Rail</span>
             </div>
           </div>
 
@@ -286,7 +285,6 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
               <div className="text-[22px] font-bold font-mono text-white tabular-nums">
                 {senderAccount ? `₹${senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : accountError ? 'Error' : '—'}
               </div>
-              <div className="text-[10px] text-white/50 mt-0.5">Demo accounts · Balances are synthetic</div>
             </div>
             <div className="text-right">
               <div className="text-[12px] font-medium text-white/90">{senderAccount?.name || '—'}</div>
@@ -376,7 +374,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
           <div className="flex border-b border-[#DCE0E7]">
             {[
               { id: 'recent' as const, label: 'Recent Transfers' },
-              { id: 'contacts' as const, label: 'Demo Beneficiaries' },
+              { id: 'contacts' as const, label: 'Beneficiaries' },
             ].map((tab) => (
               <button
                 key={tab.id}
@@ -451,8 +449,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
 
         {activeHomeTab === 'contacts' && (
           <div className="px-4 mt-3 space-y-2">
-            <div className="text-[11px] text-[#5B6575] mb-1">Demo accounts · Account names and balances are demo data.</div>
-            {DEMO_CONTACTS.map((contact) => (
+            {SAVED_CONTACTS.map((contact) => (
               <div
                 key={contact.id}
                 onClick={() => onNavigateToSend('simulated')}
@@ -483,6 +480,10 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
           >
             ← Back to Operations Console
           </button>
+        </div>
+
+        <div className="text-center text-[11px] text-[#5B6575] py-3">
+          Test environment, no real money
         </div>
 
         {/* Structured Payment Receipt Modal */}

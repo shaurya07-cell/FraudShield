@@ -250,31 +250,26 @@ def stealth_fraud_txn(sender: Optional[str] = None) -> Transaction:
 
 def scenario(name: str) -> List[Transaction]:
     if name == "normal":
-        import inspect
-        for frame in inspect.stack():
-            if "test_simulator" in frame.filename:
-                return [normal_txn()]
-        # Generate a realistic batch of ~50 varied legitimate transactions.
+        # Generate a realistic batch of 50 varied ordinary retail transactions.
+        # No single sender making many large payments.
         txns: List[Transaction] = []
-        # 30 standard normal transactions
-        for _ in range(30):
+        # 35 standard normal transactions
+        for _ in range(35):
             txns.append(normal_txn())
-        # 8 merchant transactions (high fan-in merchants)
-        for _ in range(8):
+        # 10 merchant transactions (high fan-in merchants)
+        for _ in range(10):
             txns.append(merchant_txn())
         # 5 family device transactions
         for _ in range(5):
             txns.append(family_txn())
-        # 5 salary burst batches (each returns a list)
-        for _ in range(5):
-            txns.extend(salary_burst())
-        # Shuffle to simulate time order (still roughly chronological)
+        # Shuffle to simulate natural arrival order
         random.shuffle(txns)
-        # Ensure we have at most 50 elements and preserve order by timestamp after shuffling.
-        txns = txns[:50]
         # Sort by generated timestamp to keep time order realistic.
         txns.sort(key=lambda t: t.timestamp)
         return txns
+    elif name == "bulk_payer":
+        # Bulk-payer pattern: one account paying many receivers large amounts quickly
+        return salary_burst(count=15)
     elif name == "velocity_attack":
         return velocity_attack()
     elif name == "ring_attack":

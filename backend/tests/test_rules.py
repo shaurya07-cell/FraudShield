@@ -1,6 +1,6 @@
 import pytest
 from app.rules import evaluate, score_from_reasons
-from app.schemas import Reason
+from app.schemas import Reason, Transaction
 from app.simulator import fanout_cashout, normal_txn, ring_attack, velocity_attack
 from app.state import GLOBAL_STATE, reset
 
@@ -44,6 +44,28 @@ def test_fanout_cashout_triggers_fan_in():
             triggered_rules.add(r.rule)
 
     assert "FAN_IN" in triggered_rules
+    assert "RAPID_PASSTHROUGH" in triggered_rules
+
+
+def test_fan_out_rule_triggers():
+    reset()
+    sender = "ACC_FANOUT_01"
+    # Sender sends to 6 distinct receivers within 60s
+    for i in range(6):
+        t = Transaction(
+            txn_id=f"TXN_FO_{i}",
+            timestamp="2026-11-28T10:00:00Z",
+            sender_id=sender,
+            receiver_id=f"ACC_REC_{i:02d}",
+            amount=500.0,
+            device_id=f"DEV_{sender}",
+            ip="192.168.1.1",
+            channel="UPI",
+        )
+        reasons = evaluate(t, GLOBAL_STATE)
+
+    triggered = [r.rule for r in reasons]
+    assert "FAN_OUT" in triggered
 
 
 def test_normal_txns_produce_fewer_than_5_percent_flagged():
