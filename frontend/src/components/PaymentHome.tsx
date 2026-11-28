@@ -22,18 +22,24 @@ type PayHomeTab = 'recent' | 'contacts';
 interface PaymentHomeProps {
   onNavigateToSend: (mode: 'simulated' | 'razorpay', options?: { autoScan?: boolean; selfTransfer?: boolean }) => void;
   onBackToDashboard?: () => void;
+  isBalanceUnlocked?: boolean;
+  onRequireBalancePin?: () => void;
+  onMaskBalance?: () => void;
 }
 
 const SAVED_CONTACTS = [
   { handle: 'ACC_0015', id: 'ACC_0015', tag: 'Beneficiary' },
   { handle: 'ACC_0042', id: 'ACC_0042', tag: 'Beneficiary' },
-  { handle: 'success@razorpay', id: 'success@razorpay', tag: 'Test mode' },
+  { handle: 'success@razorpay', id: 'success@razorpay', tag: 'Sandbox' },
   { handle: 'ACC_0120', id: 'ACC_0120', tag: 'Beneficiary' },
 ];
 
 export const PaymentHome: React.FC<PaymentHomeProps> = ({
   onNavigateToSend,
   onBackToDashboard,
+  isBalanceUnlocked = false,
+  onRequireBalancePin,
+  onMaskBalance,
 }) => {
   const [razorpayConfig, setRazorpayConfig] = useState<RazorpayConfig | null>(null);
   const [senderAccount, setSenderAccount] = useState<GatewayAccount | null>(null);
@@ -147,10 +153,10 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
           <div className="bg-white border border-[#DCE0E7] rounded-[10px] p-5 shadow-xs">
             <div className="flex items-center gap-3.5 mb-5 pb-4 border-b border-[#E3E7EE]">
               <div className="w-14 h-14 rounded-full bg-[#1F4FD8] text-white flex items-center justify-center text-[18px] font-semibold font-mono shadow-xs">
-                {senderAccount?.name ? senderAccount.name.slice(0, 2).toUpperCase() : 'FS'}
+                SH
               </div>
               <div>
-                <div className="text-[17px] font-semibold text-[#1B2433]">{senderAccount?.name || '—'}</div>
+                <div className="text-[17px] font-semibold text-[#1B2433]">Shaurya Hindocha</div>
                 <div className="text-[12px] font-mono text-[#5B6575]">Account ID: {senderAccount?.id || '—'}</div>
               </div>
             </div>
@@ -167,19 +173,42 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
               <div className="flex justify-between items-end pt-1">
                 <div>
                   <div className="text-[9px] text-white/60 uppercase">Available Balance</div>
-                  <div className="text-[20px] font-bold font-mono text-white">
-                    {senderAccount ? `₹${senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : '—'}
+                  <div className="flex items-center gap-2 pt-0.5">
+                    <div className="text-[20px] font-bold font-mono text-white">
+                      {isBalanceUnlocked && senderAccount
+                        ? `₹${senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                        : isBalanceUnlocked && accountError
+                        ? 'Unavailable'
+                        : '₹••••••'}
+                    </div>
+                    {isBalanceUnlocked ? (
+                      <button
+                        type="button"
+                        onClick={onMaskBalance}
+                        className="text-[10px] text-white/70 hover:text-white underline"
+                      >
+                        Hide
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={onRequireBalancePin}
+                        className="text-[10px] font-medium text-white bg-[#1F4FD8] hover:bg-[#183EB0] px-2 py-0.5 rounded shadow-2xs"
+                      >
+                        Check Balance
+                      </button>
+                    )}
                   </div>
                 </div>
                 <div className="text-right">
                   <div className="text-[9px] text-white/60 uppercase">Account Holder</div>
-                  <div className="text-[11px] font-medium text-white">{senderAccount?.name || '—'}</div>
+                  <div className="text-[11px] font-medium text-white">Shaurya Hindocha</div>
                 </div>
               </div>
             </div>
 
             <div className="mt-4 pt-3 border-t border-[#E3E7EE] text-[11px] text-[#5B6575] text-center">
-              Test environment, no real money
+              Sandbox payment — no real funds move.
             </div>
           </div>
         </div>
@@ -282,12 +311,38 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
           <div className="bg-white/5 border border-white/10 rounded-[10px] p-3.5 flex items-center justify-between">
             <div>
               <div className="text-[10px] text-white/60 uppercase tracking-wider">Available Balance</div>
-              <div className="text-[22px] font-bold font-mono text-white tabular-nums">
-                {senderAccount ? `₹${senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}` : accountError ? 'Error' : '—'}
+              <div className="flex items-center gap-2 pt-0.5">
+                <div className="text-[22px] font-bold font-mono text-white tabular-nums tracking-tight">
+                  {isBalanceUnlocked && senderAccount
+                    ? `₹${senderAccount.balance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}`
+                    : isBalanceUnlocked && accountError
+                    ? 'Unavailable'
+                    : '₹••••••'}
+                </div>
+                {isBalanceUnlocked ? (
+                  <button
+                    type="button"
+                    onClick={onMaskBalance}
+                    className="text-[11px] font-medium text-white/70 hover:text-white px-2 py-0.5 rounded bg-white/10 transition-colors"
+                  >
+                    Hide
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={onRequireBalancePin}
+                    className="text-[11px] font-medium text-white bg-[#1F4FD8] hover:bg-[#183EB0] px-2.5 py-1 rounded-[6px] transition-colors flex items-center gap-1 shadow-xs"
+                  >
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    <span>Check Balance</span>
+                  </button>
+                )}
               </div>
             </div>
             <div className="text-right">
-              <div className="text-[12px] font-medium text-white/90">{senderAccount?.name || '—'}</div>
+              <div className="text-[12px] font-medium text-white/90">Shaurya Hindocha</div>
               <div className="text-[11px] font-mono text-white/50">•••• {senderAccount?.id ? senderAccount.id.slice(-4) : '—'}</div>
             </div>
           </div>
@@ -328,7 +383,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
                 </div>
                 <div className="text-center">
                   <div className="text-[11px] font-semibold text-[#1B2433]">Card / Net</div>
-                  <div className="text-[10px] text-[#5B6575]">Test mode</div>
+                  <div className="text-[10px] text-[#5B6575]">Sandbox</div>
                 </div>
               </button>
 
@@ -485,7 +540,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
         )}
 
         <div className="text-center text-[11px] text-[#5B6575] py-3">
-          Test environment, no real money
+          Sandbox payment — no real funds move.
         </div>
 
         {/* Structured Payment Receipt Modal */}
