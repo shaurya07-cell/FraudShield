@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp_utc": "2026-11-28T02:27:44.981068+00:00",
+    "timestamp_utc": "2026-11-28T03:30:21.358783+00:00",
     "python_version": "3.14.6 (tags/v3.14.6:c63aec6, Jun 10 2026, 10:26:10) [MSC v.1944 64 bit (AMD64)]",
     "platform": "Windows-11-10.0.26300-SP0",
     "libraries": {
@@ -16,82 +16,82 @@
     "transactions_tested": 2000,
     "warmup_transactions": 200,
     "total_pipeline_ms": {
-      "mean": 7.658,
-      "p50": 7.009,
-      "p95": 11.231,
-      "p99": 12.852,
-      "max": 74.327
+      "mean": 7.143,
+      "p50": 6.703,
+      "p95": 10.534,
+      "p99": 11.203,
+      "max": 71.186
     },
     "stage_breakdown_ms": {
       "rules": {
-        "mean": 0.122,
-        "p50": 0.093,
+        "mean": 0.114,
+        "p50": 0.08,
         "p95": 0.314,
-        "p99": 0.436,
-        "max": 0.691
+        "p99": 0.43,
+        "max": 0.774
       },
       "graph_cache": {
         "mean": 0.001,
         "p50": 0.001,
-        "p95": 0.002,
-        "p99": 0.002,
-        "max": 0.012
+        "p95": 0.001,
+        "p99": 0.001,
+        "max": 0.01
       },
       "feature_extraction": {
-        "mean": 0.068,
-        "p50": 0.048,
-        "p95": 0.178,
-        "p99": 0.265,
-        "max": 2.069
+        "mean": 0.062,
+        "p50": 0.043,
+        "p95": 0.175,
+        "p99": 0.244,
+        "max": 0.925
       },
       "model_supervised_xgb": {
-        "mean": 0.546,
-        "p50": 0.486,
-        "p95": 0.874,
-        "p99": 1.218,
-        "max": 7.801
+        "mean": 0.513,
+        "p50": 0.432,
+        "p95": 0.717,
+        "p99": 0.999,
+        "max": 64.884
       },
       "model_anomaly_iforest": {
-        "mean": 3.745,
-        "p50": 3.409,
-        "p95": 5.564,
-        "p99": 6.158,
-        "max": 17.614
+        "mean": 3.569,
+        "p50": 3.294,
+        "p95": 5.444,
+        "p99": 5.713,
+        "max": 12.332
       },
       "model_behaviour_profile": {
-        "mean": 0.011,
-        "p50": 0.012,
-        "p95": 0.024,
-        "p99": 0.027,
-        "max": 0.055
+        "mean": 0.009,
+        "p50": 0.011,
+        "p95": 0.018,
+        "p99": 0.023,
+        "max": 0.073
       },
       "model_graph_topological": {
-        "mean": 0.578,
-        "p50": 0.54,
-        "p95": 0.861,
-        "p99": 1.285,
-        "max": 3.371
+        "mean": 0.513,
+        "p50": 0.493,
+        "p95": 0.74,
+        "p99": 0.97,
+        "max": 1.781
       },
       "model_device_identity": {
-        "mean": 0.457,
-        "p50": 0.371,
-        "p95": 0.705,
-        "p99": 1.102,
-        "max": 67.358
+        "mean": 0.379,
+        "p50": 0.334,
+        "p95": 0.566,
+        "p99": 0.946,
+        "max": 1.672
       },
       "model_mule_tracker": {
         "mean": 0.002,
         "p50": 0.002,
         "p95": 0.003,
-        "p99": 0.004,
-        "max": 0.015
+        "p99": 0.003,
+        "max": 0.016
       },
       "meta_learner": {
-        "mean": 2.09,
-        "p50": 1.885,
-        "p95": 3.083,
-        "p99": 3.47,
-        "max": 16.09
+        "mean": 1.948,
+        "p50": 1.807,
+        "p95": 2.943,
+        "p99": 3.15,
+        "max": 4.96
       }
     }
   },
@@ -99,11 +99,11 @@
     "requests_sent": 300,
     "requests_successful": 300,
     "http_latency_ms": {
-      "mean": 19.533,
-      "p50": 19.155,
-      "p95": 23.924,
-      "p99": 31.267,
-      "max": 34.198
+      "mean": 15.982,
+      "p50": 15.27,
+      "p95": 20.785,
+      "p99": 22.11,
+      "max": 23.876
     }
   },
   "graph_scale_and_ring_detection": {
@@ -112,38 +112,38 @@
         "actual_nodes": 1000,
         "actual_edges": 2033,
         "full_pipeline_latency_ms": {
-          "mean": 10.188,
-          "p50": 9.504,
-          "p95": 13.555,
-          "p99": 14.444,
-          "max": 14.63
+          "mean": 8.61,
+          "p50": 7.975,
+          "p95": 12.804,
+          "p99": 13.458,
+          "max": 13.517
         }
       },
       "nodes_2500": {
         "actual_nodes": 2500,
         "actual_edges": 5124,
         "full_pipeline_latency_ms": {
-          "mean": 11.075,
-          "p50": 11.923,
-          "p95": 13.736,
-          "p99": 14.006,
-          "max": 14.141
+          "mean": 7.455,
+          "p50": 7.483,
+          "p95": 8.418,
+          "p99": 8.787,
+          "max": 8.969
         }
       },
       "nodes_5000": {
         "actual_nodes": 4998,
         "actual_edges": 10158,
         "full_pipeline_latency_ms": {
-          "mean": 8.242,
-          "p50": 8.041,
-          "p95": 9.683,
-          "p99": 11.113,
-          "max": 11.428
+          "mean": 8.651,
+          "p50": 8.011,
+          "p95": 12.88,
+          "p99": 13.919,
+          "max": 14.428
         }
       }
     },
     "ring_injection_test": {
-      "code_path": "app.graph_engine.GraphEngine.recompute_cache -> nx.strongly_connected_components(self.graph) [filters SCC with len >= 2 or self-loops, scores by max/avg node risk]",
+      "code_path": "app.graph_engine.GraphEngine.recompute_cache -> bounded cycles of length 3-8 on risk-filtered subgraph (risk >= 0.30), ring size cap 10 (oversized components -> dense_clusters)",
       "members_injected": 8,
       "members_found": 7,
       "total_detected_in_all_rings": 7,
@@ -192,28 +192,28 @@
       "allowed": 9,
       "total_flagged": 7,
       "flagged_percent": 43.8,
-      "mean_score": 47.8,
+      "mean_score": 47.4,
       "max_score": 74
     }
   },
   "false_positive_rates": {
     "cold_start_after_reset": {
       "transactions_tested": 200,
-      "review_count": 1,
+      "review_count": 0,
       "block_count": 0,
-      "total_false_positives": 1,
-      "false_positive_rate_percent": 0.5,
-      "mean_score": 1.55,
-      "max_score": 58
+      "total_false_positives": 0,
+      "false_positive_rate_percent": 0.0,
+      "mean_score": 1.09,
+      "max_score": 7
     },
     "warmed_baseline_after_500_txns": {
       "transactions_tested": 200,
-      "review_count": 6,
-      "block_count": 0,
-      "total_false_positives": 6,
-      "false_positive_rate_percent": 3.0,
-      "mean_score": 3.64,
-      "max_score": 67
+      "review_count": 3,
+      "block_count": 1,
+      "total_false_positives": 4,
+      "false_positive_rate_percent": 2.0,
+      "mean_score": 3.19,
+      "max_score": 76
     }
   }
 }

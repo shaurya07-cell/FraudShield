@@ -24,7 +24,7 @@ To protect instant payment switches, the system must enforce deterministic polic
 |---|---|---|
 | **Real-time Rule Validator** | Deterministic heuristics (velocity bursts, impossible travel, high-risk merchant categories, round-trip anomalies, structuring). | [`backend/app/rules.py`](backend/app/rules.py) |
 | **Topological Ring Detection** | Bounded-length cycle detection ($3 \le k \le 8$) on risk-weighted transaction graph subgraphs. | [`backend/app/graph_engine.py`](backend/app/graph_engine.py) |
-| **Sub-100 ms Decision SLA** | Synchronous scoring pipeline averaging $\sim 7.6$ ms execution time. | [`backend/app/scorer.py`](backend/app/scorer.py) |
+| **Sub-100 ms Decision SLA** | Synchronous scoring pipeline averaging 7.098 ms execution time. | [`backend/app/scorer.py`](backend/app/scorer.py) |
 | **Multi-Model ML Scoring** | 6-model specialist ensemble (XGBoost, Isolation Forest, Profile Baselines, Graph Metrics, Device Clusters, Mule Tracker) fused via a calibrated meta-learner. | [`backend/app/models_ensemble.py`](backend/app/models_ensemble.py) |
 | **Traffic Simulation & Attacks** | Stream generator supporting benign transactions, merchant fan-in, velocity attacks, cycle loops, and mule fan-out cashouts. | [`backend/app/simulator.py`](backend/app/simulator.py) |
 | **Stateful Payment Gateway** | In-memory simulated payment gateway with 2-factor OTP verification, atomic balance updates, payee resolution, and receipt generation. | [`backend/app/gateway.py`](backend/app/gateway.py) |
@@ -185,47 +185,48 @@ VITE_API_BASE=http://127.0.0.1:8000
 > **Benchmark Conditions**: Measured strictly from [`docs/audit_benchmark.json`](docs/audit_benchmark.json) using synthetic transaction traffic on a local Windows 11 laptop on 2026-11-28. No results are rounded up or cherry-picked.
 
 ### Pipeline Latency Breakdown (2,000 Transactions after 200 Warmup)
-- **Mean Pipeline Latency**: `7.658 ms`
-- **Median (p50)**: `7.009 ms`
-- **95th Percentile (p95)**: `11.231 ms`
-- **99th Percentile (p99)**: `12.852 ms`
-- **Maximum Observed**: `74.327 ms`
+- **Mean Pipeline Latency**: `7.098 ms`
+- **Median (p50)**: `6.665 ms`
+- **95th Percentile (p95)**: `10.332 ms`
+- **99th Percentile (p99)**: `11.976 ms`
+- **Maximum Observed**: `71.918 ms`
 
 | Stage | Mean (ms) | p50 (ms) | p95 (ms) | p99 (ms) | Max (ms) |
 |---|---|---|---|---|---|
-| Rule Engine | 0.122 | 0.093 | 0.314 | 0.436 | 0.691 |
-| Feature Extraction (19 features) | 0.068 | 0.048 | 0.178 | 0.265 | 2.069 |
-| Supervised Model (XGBoost) | 0.546 | 0.486 | 0.874 | 1.218 | 7.801 |
-| Anomaly Detector (Isolation Forest) | 3.745 | 3.409 | 5.564 | 6.158 | 17.614 |
-| Behaviour Profile Baseline | 0.011 | 0.012 | 0.024 | 0.027 | 0.055 |
-| Graph Topological Model | 0.578 | 0.540 | 0.861 | 1.285 | 3.371 |
-| Device Identity Model | 0.457 | 0.371 | 0.705 | 1.102 | 67.358 |
-| Mule Tracker | 0.002 | 0.002 | 0.003 | 0.004 | 0.015 |
-| Meta-Learner (Fusion) | 2.090 | 1.885 | 3.083 | 3.470 | 16.090 |
+| Rule Engine | 0.120 | 0.089 | 0.324 | 0.456 | 1.245 |
+| Feature Extraction (19 features) | 0.066 | 0.047 | 0.184 | 0.272 | 0.449 |
+| Supervised Model (XGBoost) | 0.473 | 0.425 | 0.749 | 1.092 | 1.859 |
+| Anomaly Detector (Isolation Forest) | 3.546 | 3.331 | 5.318 | 5.848 | 12.403 |
+| Behaviour Profile Baseline | 0.009 | 0.011 | 0.019 | 0.024 | 0.067 |
+| Graph Topological Model | 0.505 | 0.469 | 0.757 | 1.149 | 2.848 |
+| Device Identity Model | 0.378 | 0.335 | 0.583 | 1.013 | 4.449 |
+| Mule Tracker | 0.002 | 0.002 | 0.003 | 0.003 | 0.012 |
+| Meta-Learner (Fusion) | 1.965 | 1.814 | 2.890 | 3.393 | 66.707 |
 
 ### Latency at Graph Scale (Full Pipeline under Network Graph Density)
-- **1,000 Accounts** (2,033 edges): Mean `10.188 ms` | p50 `9.504 ms` | p95 `13.555 ms` | p99 `14.444 ms` | Max `14.630 ms`
-- **2,500 Accounts** (5,124 edges): Mean `11.075 ms` | p50 `11.923 ms` | p95 `13.736 ms` | p99 `14.006 ms` | Max `14.141 ms`
-- **5,000 Accounts** (10,158 edges): Mean `8.242 ms` | p50 `8.041 ms` | p95 `9.683 ms` | p99 `11.113 ms` | Max `11.428 ms`
+- **1,000 Accounts** (2,033 edges): Mean `7.815 ms` | p50 `7.209 ms` | p95 `11.786 ms` | p99 `12.102 ms` | Max `12.356 ms`
+- **2,500 Accounts** (5,124 edges): Mean `7.283 ms` | p50 `7.267 ms` | p95 `7.974 ms` | p99 `8.450 ms` | Max `8.477 ms`
+- **5,000 Accounts** (10,158 edges): Mean `9.859 ms` | p50 `11.309 ms` | p95 `12.233 ms` | p99 `12.782 ms` | Max `13.212 ms`
 
 ### API Handler Latency (FastAPI In-Process TestClient, 300 Requests)
-- **Mean Latency**: `19.533 ms`
-- **Median (p50)**: `19.155 ms`
-- **95th Percentile (p95)**: `23.924 ms`
-- **99th Percentile (p99)**: `31.267 ms`
-- **Maximum Observed**: `34.198 ms`
+- **Mean Latency**: `15.777 ms`
+- **Median (p50)**: `15.201 ms`
+- **95th Percentile (p95)**: `19.845 ms`
+- **99th Percentile (p99)**: `22.710 ms`
+- **Maximum Observed**: `32.134 ms`
 *(Note: Represents in-process application serializer overhead; does not include physical network transmission).*
 
 ### Attack Scenario Detection Rates
 - **`velocity_attack`**: **15 / 15 flagged (100.0%)** — `13 BLOCK`, `2 REVIEW`, `0 ALLOW` (Mean Score: `77.5`).
 - **`ring_attack`**: **11 / 15 flagged (73.3%)** — `6 BLOCK`, `5 REVIEW`, `4 ALLOW` (Mean Score: `53.7`).
-- **`fanout_cashout`**: **7 / 16 flagged (43.8%)** — `3 BLOCK`, `4 REVIEW`, `9 ALLOW` (Mean Score: `47.8`).
+- **`fanout_cashout`**: **7 / 16 flagged (43.8%)** — `3 BLOCK`, `4 REVIEW`, `9 ALLOW` (Mean Score: `47.1`).
 
 ### False Positive Rates on Benign Traffic (200 Normal Transactions)
-- **Cold Start (Immediately after reset)**: **0.50%** false positive rate (`1 REVIEW`, `0 BLOCK`, Mean Score: `1.55`).
-- **Warmed Baseline (After 500-transaction warm-up)**: **3.00%** false positive rate (`6 REVIEW`, `0 BLOCK`, Mean Score: `3.64`).
+- **Cold Start (Immediately after reset)**: **0.50%** false positive rate (`1 REVIEW`, `0 BLOCK`, Mean Score: `1.52`, Max Score: `61`).
+- **Warmed Baseline (After 500-transaction warm-up)**: **5.00%** false positive rate (`10 REVIEW`, `0 BLOCK`, Mean Score: `4.54`, Max Score: `64`).
 
 ### Ring Detection Precision & Recall (5,000 Accounts, 8-Member Injected Ring)
+On a synthetic 5,000-account test where ring transfers carry high risk scores, 7 of 8 injected members were found with 0 innocent accounts. Rings that look like normal traffic were not tested.
 - **Members Found**: **7 / 8** (**87.50% Recall**; member 07 serves as an external cashout sink).
 - **Innocent Accounts Included**: **0 / 7** (**0.00% Contamination Rate**).
 - **Detection Precision**: **100.00%** (**7 true members** / 7 reported ring members).
@@ -238,12 +239,13 @@ VITE_API_BASE=http://127.0.0.1:8000
 2. **Graph Methods**: "Graph-based" denotes topological algorithms (NetworkX PageRank, degree centrality, clustering coefficients, and bounded-length cycle detection). **No Graph Neural Network (GNN) is trained or deployed**.
 3. **Legacy SCC Vulnerability**: Global Strongly Connected Component (SCC) algorithms without bounded-cycle and risk filtering report 261 accounts for an 8-member ring (**254 innocent accounts, 2.7% precision**). Precision depends on the bounded-length cycle filter.
 4. **Mule Fan-Out Blindspot**: In `fanout_cashout` scenarios, initial victim payments are indistinguishable from normal retail transfers and pass through (`43.8%` overall scenario detection). Only the downstream aggregation hops get flagged.
-5. **False Positive Rates**: While baseline false positives (`3.0%`) fall within standard target bands, cold starts can flag unfamiliar high-amount transfers before baseline establishment.
+5. **False Positive Rates**: While baseline false positives (`5.0%`) fall within standard target bands, cold starts can flag unfamiliar high-amount transfers before baseline establishment.
 6. **Local In-Process Benchmark**: Latency metrics reflect single-process execution on a laptop, not high-volume concurrent network load testing across distributed hosts.
 7. **In-Memory Volatility**: Graph nodes, account balances, and velocity sliding windows reside in Python process memory. Server restarts wipe transient state.
 8. **No API Authentication**: Local development endpoints lack mTLS, API keys, or OAuth2 authorization headers.
 9. **Render Deployment Sleeping**: Free-tier cloud instances sleep after 15 minutes of inactivity, dropping in-memory state upon cold spin-up.
 10. **Test Mode Razorpay**: Test-mode integration; code and mocked tests only; no real test payment verified yet. No real money moves.
+11. **Render Cold Start Latency**: Dashboard latency on Render's free tier can spike after a cold start; quoted figures come from the audited local benchmark.
 
 ---
 
