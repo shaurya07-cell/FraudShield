@@ -179,3 +179,89 @@ def test_fraudshield_models_dir_env_override(tmp_path, monkeypatch):
     assert get_models_dir() == str(valid_temp.resolve())
 
 
+def test_feature_contributions_differ_between_normal_and_high_amount():
+    """Verify ML_MODEL reason names top 3 features with direction, differing between normal and high-amount."""
+    t_normal = normal_txn()
+    s_normal = score_transaction(t_normal)
+
+    t_high = normal_txn()
+    t_high.amount = 98500.0
+    s_high = score_transaction(t_high)
+
+    normal_ml_reasons = [r.detail for r in s_normal.reasons if r.rule == "ML_MODEL"]
+    high_ml_reasons = [r.detail for r in s_high.reasons if r.rule == "ML_MODEL"]
+
+    assert len(normal_ml_reasons) == 1, f"Expected 1 ML_MODEL reason, got: {normal_ml_reasons}"
+    assert len(high_ml_reasons) == 1, f"Expected 1 ML_MODEL reason, got: {high_ml_reasons}"
+
+    # Verify both directions (raises risk or lowers risk) and top 3 drivers are named
+    for detail in [normal_ml_reasons[0], high_ml_reasons[0]]:
+        assert ("raises risk" in detail) or ("lowers risk" in detail), f"Missing direction in reason: {detail}"
+        # Names top 3 features (each followed by direction)
+        direction_count = detail.count("raises risk") + detail.count("lowers risk")
+        assert direction_count == 3, f"Expected 3 feature directions in reason, got {direction_count}: {detail}"
+
+    # Reasons must differ between normal and high-amount transactions
+    assert normal_ml_reasons[0] != high_ml_reasons[0], "Explanations should differ for different transactions"
+
+
+def test_feature_contributions_fallback_when_model_missing(monkeypatch):
+    """Verify graceful omission of ML_MODEL reasons when supervised booster cannot be computed."""
+    from app.models_ensemble import GLOBAL_ENSEMBLE
+    monkeypatch.setattr(GLOBAL_ENSEMBLE, "supervised_model", None)
+
+    txn = normal_txn()
+    scored = score_transaction(txn)
+
+    # Scored transaction still succeeds
+    assert 0 <= scored.risk_score <= 100
+    assert scored.decision in ["ALLOW", "REVIEW", "BLOCK"]
+
+    # No ML_MODEL reason is fabricated
+    ml_reasons = [r for r in scored.reasons if r.rule == "ML_MODEL"]
+    assert len(ml_reasons) == 0, f"Expected 0 fabricated ML_MODEL reasons, found: {ml_reasons}"
+
+
+def test_graph_reason_absent_for_account_with_no_cluster():
+    """Verify MODEL_GRAPH reason is never emitted for isolated normal accounts (neutral 0.467 not shown as finding)."""
+    txn = normal_txn()
+    scored = score_transaction(txn)
+
+    # The model score is at the neutral baseline ~0.467
+    assert scored.model_scores is not None
+    assert scored.model_scores.get("graph") == 0.467
+
+    # But the MODEL_GRAPH reason MUST be absent because there is no cluster/ring
+    graph_reasons = [r for r in scored.reasons if r.rule == "MODEL_GRAPH"]
+    assert len(graph_reasons) == 0, f"Expected no MODEL_GRAPH reason for isolated account, got: {graph_reasons}"
+
+
+def test_graph_reason_present_with_real_data_for_ring():
+    """Verify MODEL_GRAPH reason is emitted and references real ring/cycle data when genuine risk exists."""
+    from app.graph_engine import GLOBAL_GRAPH
+    from app.simulator import ring_attack
+
+    ring_txns = ring_attack()
+    for t in ring_txns:
+        score_transaction(t)
+
+    # Recompute graph cache to detect ring
+    GLOBAL_GRAPH.recompute_cache()
+
+    # Score an additional transaction involving a member of the ring
+    member_txn = normal_txn()
+    member_txn.sender_id = ring_txns[0].sender_id
+    member_txn.receiver_id = ring_txns[0].receiver_id
+    scored = score_transaction(member_txn)
+
+    graph_reasons = [r for r in scored.reasons if r.rule == "MODEL_GRAPH"]
+    assert len(graph_reasons) == 1, f"Expected 1 MODEL_GRAPH reason for ring member, got: {graph_reasons}"
+    # Verify the detail reflects real data (e.g. ring, loop, or cluster)
+    detail = graph_reasons[0].detail.lower()
+    assert ("ring" in detail) or ("cyclical" in detail) or ("cluster" in detail), (
+        f"Expected real graph data in reason, got: {graph_reasons[0].detail}"
+    )
+
+
+
+

@@ -551,7 +551,7 @@ class FraudEnsemble:
             "meta": round(meta_prob, 3),
         }
 
-        # Generate explainable reasons for models that contributed meaningfully
+        # Generate explainable reasons for models that contributed meaningfully above neutral baseline
         reasons: List[Reason] = []
         if s_sup >= 0.40:
             reasons.append(
@@ -577,19 +577,53 @@ class FraudEnsemble:
                     weight=int(round(s_prof * 20)),
                 )
             )
-        if s_graph >= 0.40:
+
+        # Baseline graph score is ~0.467. Only emit when score is clearly above default (0.467)
+        # OR the account belongs to a detected ring or cluster.
+        comp_size = features.get("component_size", 1.0)
+        in_cycle = features.get("in_cycle", 0.0)
+        node_to_ring = (graph_cache or {}).get("node_to_ring", {})
+        ring_id = node_to_ring.get(transaction.sender_id) or node_to_ring.get(transaction.receiver_id)
+        is_in_cluster_or_ring = (ring_id is not None) or (in_cycle > 0) or (comp_size > 1.0)
+        clearly_above_graph_default = s_graph > 0.50
+
+        if clearly_above_graph_default or is_in_cluster_or_ring:
+            if ring_id:
+                graph_detail = f"Account belongs to detected fraud ring {ring_id} (graph score {s_graph:.2f})"
+            elif in_cycle > 0:
+                graph_detail = f"Account participating in cyclical transaction loop (graph score {s_graph:.2f})"
+            elif comp_size > 1.0:
+                graph_detail = f"Account situated in transaction cluster of {int(comp_size)} nodes (graph score {s_graph:.2f})"
+            else:
+                graph_detail = f"Graph topological risk elevated above baseline (score {s_graph:.2f})"
             reasons.append(
                 Reason(
                     rule="MODEL_GRAPH",
-                    detail=f"Account situated in high-risk transaction cluster (score {s_graph:.2f})",
+                    detail=graph_detail,
                     weight=int(round(s_graph * 25)),
                 )
             )
-        if s_dev >= 0.40:
+
+        # Baseline device score is ~0.285. Only emit when score is clearly above default (0.285)
+        # OR the account belongs to a detected ring or cluster / device collision.
+        dev_shared = features.get("device_shared_accounts", 1.0)
+        is_rt = features.get("is_round_trip", 0.0)
+        has_device_collision = (dev_shared > 1.0) or (is_rt > 0)
+        clearly_above_dev_default = s_dev > 0.35
+
+        if clearly_above_dev_default or is_in_cluster_or_ring or has_device_collision:
+            if dev_shared > 1.0:
+                dev_detail = f"Device shared across {int(dev_shared)} accounts (device score {s_dev:.2f})"
+            elif is_rt > 0:
+                dev_detail = f"Direct circular flow detected (device score {s_dev:.2f})"
+            elif ring_id:
+                dev_detail = f"Device linked to fraud ring {ring_id} (score {s_dev:.2f})"
+            else:
+                dev_detail = f"Device identity risk elevated above baseline (score {s_dev:.2f})"
             reasons.append(
                 Reason(
                     rule="MODEL_DEVICE",
-                    detail=f"Device or IP collision risk detected (score {s_dev:.2f})",
+                    detail=dev_detail,
                     weight=int(round(s_dev * 25)),
                 )
             )
