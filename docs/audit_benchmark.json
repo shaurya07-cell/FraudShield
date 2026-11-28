@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "timestamp_utc": "2026-11-28T05:07:16.898850+00:00",
+    "timestamp_utc": "2026-11-28T05:16:25.039795+00:00",
     "python_version": "3.14.6 (tags/v3.14.6:c63aec6, Jun 10 2026, 10:26:10) [MSC v.1944 64 bit (AMD64)]",
     "platform": "Windows-11-10.0.26300-SP0",
     "libraries": {
@@ -16,82 +16,82 @@
     "transactions_tested": 2000,
     "warmup_transactions": 200,
     "total_pipeline_ms": {
-      "mean": 6.958,
-      "p50": 6.493,
-      "p95": 10.526,
-      "p99": 11.292,
-      "max": 85.237
+      "mean": 7.29,
+      "p50": 6.709,
+      "p95": 10.609,
+      "p99": 11.724,
+      "max": 70.764
     },
     "stage_breakdown_ms": {
       "rules": {
-        "mean": 0.112,
-        "p50": 0.086,
-        "p95": 0.285,
-        "p99": 0.383,
-        "max": 0.888
+        "mean": 0.124,
+        "p50": 0.094,
+        "p95": 0.321,
+        "p99": 0.433,
+        "max": 0.716
       },
       "graph_cache": {
         "mean": 0.001,
         "p50": 0.001,
-        "p95": 0.001,
-        "p99": 0.001,
-        "max": 0.014
+        "p95": 0.002,
+        "p99": 0.002,
+        "max": 0.011
       },
       "feature_extraction": {
-        "mean": 0.058,
-        "p50": 0.041,
-        "p95": 0.155,
-        "p99": 0.212,
-        "max": 0.454
+        "mean": 0.065,
+        "p50": 0.046,
+        "p95": 0.177,
+        "p99": 0.241,
+        "max": 0.601
       },
       "model_supervised_xgb": {
-        "mean": 0.459,
-        "p50": 0.405,
-        "p95": 0.708,
-        "p99": 1.028,
-        "max": 1.854
+        "mean": 0.489,
+        "p50": 0.442,
+        "p95": 0.755,
+        "p99": 1.008,
+        "max": 1.363
       },
       "model_anomaly_iforest": {
-        "mean": 3.495,
-        "p50": 3.236,
-        "p95": 5.413,
-        "p99": 5.678,
-        "max": 12.924
+        "mean": 3.664,
+        "p50": 3.309,
+        "p95": 5.411,
+        "p99": 5.958,
+        "max": 67.186
       },
       "model_behaviour_profile": {
         "mean": 0.009,
         "p50": 0.011,
         "p95": 0.02,
         "p99": 0.023,
-        "max": 0.035
+        "max": 0.039
       },
       "model_graph_topological": {
-        "mean": 0.474,
-        "p50": 0.433,
-        "p95": 0.716,
-        "p99": 1.061,
-        "max": 1.42
+        "mean": 0.515,
+        "p50": 0.475,
+        "p95": 0.755,
+        "p99": 1.002,
+        "max": 5.575
       },
       "model_device_identity": {
-        "mean": 0.366,
-        "p50": 0.319,
-        "p95": 0.577,
-        "p99": 0.9,
-        "max": 1.406
+        "mean": 0.395,
+        "p50": 0.342,
+        "p95": 0.591,
+        "p99": 0.963,
+        "max": 7.584
       },
       "model_mule_tracker": {
         "mean": 0.002,
         "p50": 0.002,
         "p95": 0.003,
         "p99": 0.003,
-        "max": 0.009
+        "max": 0.01
       },
       "meta_learner": {
-        "mean": 1.954,
-        "p50": 1.778,
-        "p95": 2.956,
-        "p99": 3.2,
-        "max": 77.963
+        "mean": 1.993,
+        "p50": 1.811,
+        "p95": 2.957,
+        "p99": 3.297,
+        "max": 6.172
       }
     }
   },
@@ -99,11 +99,11 @@
     "requests_sent": 300,
     "requests_successful": 300,
     "http_latency_ms": {
-      "mean": 17.164,
-      "p50": 16.481,
-      "p95": 21.373,
-      "p99": 23.749,
-      "max": 31.2
+      "mean": 16.519,
+      "p50": 15.698,
+      "p95": 21.183,
+      "p99": 22.797,
+      "max": 29.537
     }
   },
   "graph_scale_and_ring_detection": {
@@ -112,33 +112,33 @@
         "actual_nodes": 1000,
         "actual_edges": 2033,
         "full_pipeline_latency_ms": {
-          "mean": 7.772,
-          "p50": 7.464,
-          "p95": 9.067,
-          "p99": 12.219,
-          "max": 12.36
+          "mean": 7.633,
+          "p50": 7.463,
+          "p95": 8.871,
+          "p99": 9.551,
+          "max": 9.89
         }
       },
       "nodes_2500": {
         "actual_nodes": 2500,
         "actual_edges": 5124,
         "full_pipeline_latency_ms": {
-          "mean": 7.876,
-          "p50": 7.351,
-          "p95": 11.762,
-          "p99": 12.913,
-          "max": 12.949
+          "mean": 7.667,
+          "p50": 7.602,
+          "p95": 8.829,
+          "p99": 9.338,
+          "max": 9.396
         }
       },
       "nodes_5000": {
         "actual_nodes": 4998,
         "actual_edges": 10158,
         "full_pipeline_latency_ms": {
-          "mean": 7.447,
-          "p50": 7.343,
-          "p95": 8.113,
-          "p99": 8.342,
-          "max": 8.474
+          "mean": 7.066,
+          "p50": 6.908,
+          "p95": 7.864,
+          "p99": 8.811,
+          "max": 8.919
         }
       }
     },
@@ -192,7 +192,7 @@
       "allowed": 8,
       "total_flagged": 8,
       "flagged_percent": 50.0,
-      "mean_score": 53.6,
+      "mean_score": 53.4,
       "max_score": 86
     }
   },
@@ -203,17 +203,17 @@
       "block_count": 0,
       "total_false_positives": 0,
       "false_positive_rate_percent": 0.0,
-      "mean_score": 1.07,
-      "max_score": 7
+      "mean_score": 1.45,
+      "max_score": 37
     },
     "warmed_baseline_after_500_txns": {
       "transactions_tested": 200,
-      "review_count": 12,
-      "block_count": 0,
+      "review_count": 11,
+      "block_count": 1,
       "total_false_positives": 12,
       "false_positive_rate_percent": 6.0,
-      "mean_score": 5.83,
-      "max_score": 66
+      "mean_score": 6.04,
+      "max_score": 78
     }
   }
 }
