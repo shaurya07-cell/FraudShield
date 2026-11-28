@@ -78,8 +78,31 @@ export interface GatewayAccount {
 export interface ResolvePayeeResponse {
   found: boolean;
   handle: string;
-  kind?: 'account' | 'vpa' | null;
+  kind?: 'account' | 'vpa' | 'phone' | null;
   display_name?: string | null;
+  account_id?: string | null;
+  vpa?: string | null;
+  phone?: string | null;        // always masked
+  bank_name?: string | null;
+  verification?: 'simulated_registry' | 'self_declared' | 'format_only' | null;
+  linked_handle?: string | null;
+  masked_phone?: string | null;
+}
+
+export interface RegisterHandleRequest {
+  display_name: string;
+  upi_id?: string;
+  phone?: string;
+  account_id?: string;
+}
+
+export interface RegisterHandleResponse {
+  registered: boolean;
+  display_name: string;
+  upi_id?: string | null;
+  masked_phone?: string | null;
+  account_id?: string | null;
+  message: string;
 }
 
 export interface GatewayPaymentRecord {
