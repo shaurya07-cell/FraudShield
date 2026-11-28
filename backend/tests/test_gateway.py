@@ -273,3 +273,71 @@ def test_resolve_unknown_vpa():
     data = res.json()
     assert data["found"] is False
     assert data["display_name"] is None
+
+
+def test_resolve_user_original_upi_id():
+    """Verify resolve endpoint detects user's real UPI ID like 8708834739@ptyes."""
+    res = client.get("/gateway/resolve?handle=8708834739@ptyes")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is True
+    assert data["kind"] == "vpa"
+    assert "8708834739" in data["handle"]
+    assert data["phone"] == "8708834739"
+    assert "Paytm" in data["bank_name"] or "YES Bank" in data["bank_name"]
+    assert data["display_name"] is not None
+
+
+def test_resolve_phone_number_auto_detect():
+    """Verify typing a 10-digit phone number detects UPI handle and linked account."""
+    res = client.get("/gateway/resolve?handle=8708834739")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is True
+    assert data["kind"] == "phone"
+    assert data["phone"] == "8708834739"
+    assert data["vpa"] == "8708834739@upi"
+    assert data["account_id"] == "ACC_8708834739"
+    assert data["display_name"] is not None
+
+
+def test_resolve_phone_number_with_country_code():
+    """Verify typing formatted phone number +91 87088 34739 normalizes and resolves."""
+    res = client.get("/gateway/resolve?handle=%2B91%2087088%2034739")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is True
+    assert data["kind"] == "phone"
+    assert data["phone"] == "8708834739"
+
+
+def test_payment_to_resolved_upi_id_succeeds():
+    """Verify payment sent to user's real UPI ID processes through gateway and moves money."""
+    sender_init = client.get("/gateway/accounts/ACC_0010").json()["balance"]
+    payload = {
+        "from_account": "ACC_0010",
+        "to_account": "8708834739@ptyes",
+        "amount": 750.0,
+        "note": "Payment via custom UPI ID",
+    }
+    res = client.post("/gateway/pay", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "SUCCESS"
+    assert data["sender_balance_after"] == round(sender_init - 750.0, 2)
+
+
+def test_payment_to_phone_number_succeeds():
+    """Verify payment sent to 10-digit phone number processes through gateway."""
+    sender_init = client.get("/gateway/accounts/ACC_0010").json()["balance"]
+    payload = {
+        "from_account": "ACC_0010",
+        "to_account": "8708834739",
+        "amount": 500.0,
+        "note": "Payment via mobile number",
+    }
+    res = client.post("/gateway/pay", json=payload)
+    assert res.status_code == 200
+    data = res.json()
+    assert data["status"] == "SUCCESS"
+    assert data["sender_balance_after"] == round(sender_init - 500.0, 2)
