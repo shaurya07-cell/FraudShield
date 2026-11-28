@@ -68,8 +68,8 @@ export const PaymentReceiptModal: React.FC<PaymentReceiptModalProps> = ({ receip
             </div>
           </div>
 
-          <p className="text-[11px] text-[#8A94A6] text-center">
-            FraudShield Test Mode Receipt. No real funds were moved or settled.
+          <p className="text-[11px] text-[#5B6575] text-center">
+            Certified digital transaction receipt issued by FraudShield Real-Time Payment Settlement System.
           </p>
 
           <button
