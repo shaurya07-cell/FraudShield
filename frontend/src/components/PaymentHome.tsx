@@ -24,7 +24,7 @@ interface PaymentHomeProps {
   onBackToDashboard: () => void;
 }
 
-const DEMO_CONTACTS = [
+const SAVED_CONTACTS = [
   { handle: 'ACC_0015', id: 'ACC_0015', tag: 'Beneficiary' },
   { handle: 'ACC_0042', id: 'ACC_0042', tag: 'Beneficiary' },
   { handle: 'success@razorpay', id: 'success@razorpay', tag: 'Test mode' },
@@ -62,7 +62,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
       });
 
     Promise.all(
-      DEMO_CONTACTS.map(async (c) => {
+      SAVED_CONTACTS.map(async (c) => {
         try {
           const res = await resolvePayee(c.id);
           return { id: c.id, name: res.display_name || c.id };
@@ -449,7 +449,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
 
         {activeHomeTab === 'contacts' && (
           <div className="px-4 mt-3 space-y-2">
-            {DEMO_CONTACTS.map((contact) => (
+            {SAVED_CONTACTS.map((contact) => (
               <div
                 key={contact.id}
                 onClick={() => onNavigateToSend('simulated')}

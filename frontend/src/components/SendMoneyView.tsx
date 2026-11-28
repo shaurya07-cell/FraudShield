@@ -253,7 +253,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const isFormatValidPayee = (val: string): boolean => {
     const v = (val || '').trim();
     if (!v) return false;
-    if (/^ACC_\d+$/i.test(v)) return true;
+    if (/^ACC_\w+$/i.test(v)) return true;
     if (/^[6-9]\d{9}$/.test(v) || /^\+91[\s]?[6-9]\d{9}$/.test(v)) return true;
     if (v.includes('@')) {
       const parts = v.split('@');
@@ -263,7 +263,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
           handle.length >= 2 &&
           psp.length >= 2 &&
           /^[a-zA-Z0-9.\-_]+$/.test(handle) &&
-          /^[a-zA-Z0-9]+$/.test(psp)
+          /^[a-zA-Z0-9.\-_]+$/.test(psp)
         ) {
           return true;
         }
@@ -341,7 +341,8 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const handleProceedToAmount = (e: React.FormEvent) => {
     e.preventDefault();
     const target = gatewayMode === 'simulated' ? toAccount : rzpPayeeId;
-    if (!isFormatValidPayee(target) && !resolvedPayee?.found) {
+    const isValid = isFormatValidPayee(target) || resolvedPayee?.verification === 'format_only' || Boolean(resolvedPayee?.found);
+    if (!isValid) {
       setErrorMessage('Please enter a format-valid UPI ID (e.g. name@upi), mobile number, or account ID.');
       return;
     }
@@ -925,7 +926,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 <div className="pt-2">
                   <button
                     type="submit"
-                    disabled={!isFormatValidPayee(currentPayee) && !resolvedPayee?.found}
+                    disabled={!isFormatValidPayee(currentPayee) && !resolvedPayee?.found && resolvedPayee?.verification !== 'format_only'}
                     className="w-full min-h-[44px] py-2.5 px-4 bg-[#1F4FD8] text-[#FFFFFF] text-[14px] font-medium rounded-[6px] hover:bg-[#183EB0] disabled:bg-[#D5DAE1] disabled:text-[#5E6B7D] disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                   >
                     <span>Proceed to Enter Amount</span>
