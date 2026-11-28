@@ -353,3 +353,25 @@ export async function registerHandle(req: RegisterHandleRequest): Promise<Regist
   return res.json();
 }
 
+export interface ParseUpiQrResponse {
+  valid: boolean;
+  pa?: string | null;
+  pn?: string | null;
+  am?: string | null;
+  raw: string;
+  message?: string | null;
+}
+
+export async function parseUpiQr(qrContent: string): Promise<ParseUpiQrResponse> {
+  const res = await fetch(`${API_BASE}/gateway/parse-upi-qr`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ qr_content: qrContent }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || 'Failed to parse UPI QR.');
+  }
+  return res.json();
+}
+

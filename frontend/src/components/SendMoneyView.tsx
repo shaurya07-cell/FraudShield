@@ -10,7 +10,7 @@ import {
   fetchRazorpayPayments,
   fetchPaymentReceipt,
   resolvePayee,
-  registerHandle,
+  parseUpiQr,
   PaymentReceipt,
 } from '../services/api';
 import type {
@@ -77,40 +77,6 @@ interface SendMoneyViewProps {
   selfTransfer?: boolean;
 }
 
-interface PresetContact {
-  handle: string;
-  accountId: string;
-  avatarBg: string;
-  role: string;
-}
-
-const PRESET_CONTACTS: PresetContact[] = [
-  {
-    handle: 'ACC_0015',
-    accountId: 'ACC_0015',
-    avatarBg: 'bg-[#1F4FD8]',
-    role: 'Demo Receiver',
-  },
-  {
-    handle: 'ACC_0042',
-    accountId: 'ACC_0042',
-    avatarBg: 'bg-[#13805B]',
-    role: 'Demo Receiver',
-  },
-  {
-    handle: 'success@razorpay',
-    accountId: 'success@razorpay',
-    avatarBg: 'bg-[#6B4FD1]',
-    role: 'Test mode, no real money',
-  },
-  {
-    handle: 'ACC_0120',
-    accountId: 'ACC_0120',
-    avatarBg: 'bg-[#B7791F]',
-    role: 'Demo Receiver',
-  },
-];
-
 export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   onBackToDashboard,
   onBackToPayHome,
@@ -134,19 +100,10 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const [senderAccount, setSenderAccount] = useState<GatewayAccount | null>(null);
 
   // Payee resolution state
-  const [presetNames, setPresetNames] = useState<Record<string, string>>({});
   const [resolvedPayee, setResolvedPayee] = useState<ResolvePayeeResponse | null>(null);
+  const [qrPayeeName, setQrPayeeName] = useState<string | null>(null);
   const [isResolving, setIsResolving] = useState<boolean>(false);
   const [resolveError, setResolveError] = useState<string | null>(null);
-
-  // Link handle demo state
-  const [showLinkForm, setShowLinkForm] = useState<boolean>(false);
-  const [linkDisplayName, setLinkDisplayName] = useState<string>('');
-  const [linkUpiId, setLinkUpiId] = useState<string>('');
-  const [linkPhone, setLinkPhone] = useState<string>('');
-  const [isLinking, setIsLinking] = useState<boolean>(false);
-  const [linkError, setLinkError] = useState<string | null>(null);
-  const [linkSuccess, setLinkSuccess] = useState<boolean>(false);
 
   // Results & verification
   const [payResult, setPayResult] = useState<GatewayPayResponse | null>(null);
@@ -286,82 +243,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
     return null;
   };
 
-  const handleRegisterLink = useCallback(async () => {
-    if (!linkDisplayName.trim()) {
-      setLinkError('Display name is required.');
-      return;
-    }
-    if (!linkUpiId.trim() && !linkPhone.trim()) {
-      setLinkError('At least one of UPI ID or phone is required.');
-      return;
-    }
-    setIsLinking(true);
-    setLinkError(null);
-    setLinkSuccess(false);
-    try {
-      await registerHandle({
-        display_name: linkDisplayName.trim(),
-        upi_id: linkUpiId.trim() || undefined,
-        phone: linkPhone.trim() || undefined,
-      });
-      setLinkSuccess(true);
-      setShowLinkForm(false);
-      setLinkDisplayName('');
-      setLinkUpiId('');
-      setLinkPhone('');
-      const currentHandle = gatewayMode === 'simulated' ? toAccount : rzpPayeeId;
-      if (currentHandle.trim()) {
-        resolveTarget(currentHandle);
-      }
-    } catch (err: any) {
-      setLinkError(err.message || 'Failed to register handle.');
-    } finally {
-      setIsLinking(false);
-    }
-  }, [linkDisplayName, linkUpiId, linkPhone, gatewayMode, toAccount, rzpPayeeId, resolveTarget]);
-
-  // Fetch preset contact names from API on mount
-  useEffect(() => {
-    let isMounted = true;
-    Promise.all(
-      PRESET_CONTACTS.map(async (c) => {
-        try {
-          const res = await resolvePayee(c.accountId);
-          return { id: c.accountId, name: res.display_name || c.accountId };
-        } catch {
-          return { id: c.accountId, name: c.accountId };
-        }
-      })
-    ).then((results) => {
-      if (!isMounted) return;
-      const map: Record<string, string> = {};
-      results.forEach((r) => {
-        map[r.id] = r.name;
-      });
-      setPresetNames(map);
-    });
-    return () => {
-      isMounted = false;
-    };
-  }, []);
-
-  // Debounced resolution for payee handle changes
-  useEffect(() => {
-    const handle = (gatewayMode === 'simulated' ? toAccount : rzpPayeeId).trim();
-    if (!handle) {
-      setResolvedPayee(null);
-      setIsResolving(false);
-      setResolveError(null);
-      return;
-    }
-
-    const timer = setTimeout(() => {
-      resolveTarget(handle);
-    }, 400);
-
-    return () => clearTimeout(timer);
-  }, [toAccount, rzpPayeeId, gatewayMode, resolveTarget]);
-
   const handleSwitchMode = (mode: 'simulated' | 'razorpay') => {
     setGatewayMode(mode);
     setStep('payee');
@@ -369,34 +250,87 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
     setRzpError(null);
   };
 
-  const handleSelectContact = (contact: PresetContact) => {
-    if (gatewayMode === 'simulated') {
-      setToAccount(contact.accountId);
-    } else {
-      setRzpPayeeId(contact.accountId);
+  const isFormatValidPayee = (val: string): boolean => {
+    const v = (val || '').trim();
+    if (!v) return false;
+    if (/^ACC_\d+$/i.test(v)) return true;
+    if (/^[6-9]\d{9}$/.test(v) || /^\+91[\s]?[6-9]\d{9}$/.test(v)) return true;
+    if (v.includes('@')) {
+      const parts = v.split('@');
+      if (parts.length === 2) {
+        const [handle, psp] = parts;
+        if (
+          handle.length >= 2 &&
+          psp.length >= 2 &&
+          /^[a-zA-Z0-9.\-_]+$/.test(handle) &&
+          /^[a-zA-Z0-9]+$/.test(psp)
+        ) {
+          return true;
+        }
+      }
     }
-    const resolvedName = presetNames[contact.accountId] || contact.accountId;
-    setToDisplayName(resolvedName);
-    setErrorMessage(null);
-    resolveTarget(contact.accountId);
+    return false;
   };
 
-  const handleUpiDecoded = (data: DecodedUpiData) => {
+  const handleUpiDecoded = async (data: DecodedUpiData) => {
+    try {
+      const parsed = await parseUpiQr(data.rawString);
+      if (parsed.valid && parsed.pa) {
+        if (parsed.pn) {
+          setQrPayeeName(parsed.pn);
+          setToDisplayName(parsed.pn);
+        } else {
+          setQrPayeeName(null);
+        }
+
+        if (gatewayMode === 'simulated') {
+          setToAccount(parsed.pa);
+          if (parsed.am) {
+            const num = parseFloat(parsed.am);
+            if (!isNaN(num) && num > 0) {
+              setAmount(parsed.am);
+            }
+          }
+        } else {
+          setRzpPayeeId(parsed.pa);
+          if (parsed.am) {
+            const num = parseFloat(parsed.am);
+            if (!isNaN(num) && num > 0) {
+              setRzpAmount(parsed.am);
+            }
+          }
+        }
+        setShowQrScanner(false);
+        setErrorMessage(null);
+        resolveTarget(parsed.pa);
+        return;
+      }
+    } catch {
+      // Fallback to local regex parse from DecodedUpiData
+    }
+
+    if (data.pn) {
+      setQrPayeeName(data.pn);
+      setToDisplayName(data.pn);
+    } else {
+      setQrPayeeName(null);
+    }
+
     if (gatewayMode === 'simulated') {
       setToAccount(data.pa);
-      if (data.pn) {
-        setToDisplayName(data.pn);
-      }
       if (data.am) {
-        setAmount(data.am);
+        const parsed = parseFloat(data.am);
+        if (!isNaN(parsed) && parsed > 0) {
+          setAmount(data.am);
+        }
       }
     } else {
       setRzpPayeeId(data.pa);
-      if (data.pn) {
-        setToDisplayName(data.pn);
-      }
       if (data.am) {
-        setRzpAmount(data.am);
+        const parsed = parseFloat(data.am);
+        if (!isNaN(parsed) && parsed > 0) {
+          setRzpAmount(data.am);
+        }
       }
     }
     setShowQrScanner(false);
@@ -406,9 +340,9 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
 
   const handleProceedToAmount = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isResolving) return;
-    if (!resolvedPayee?.found) {
-      setErrorMessage('Please select or enter a recipient account found in the registry.');
+    const target = gatewayMode === 'simulated' ? toAccount : rzpPayeeId;
+    if (!isFormatValidPayee(target) && !resolvedPayee?.found) {
+      setErrorMessage('Please enter a format-valid UPI ID (e.g. name@upi), mobile number, or account ID.');
       return;
     }
     setErrorMessage(null);
@@ -642,7 +576,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
               </div>
               <div>
                 <h1 className="text-[16px] font-semibold text-[#1B2433]">Send Money</h1>
-                <div className="text-[11px] text-[#5B6575]">Demo accounts · Test environment</div>
+                <div className="text-[11px] text-[#5B6575]">Instant Payment Gateway</div>
               </div>
             </div>
 
@@ -674,7 +608,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
               </div>
             ) : (
               <span className="self-start sm:self-auto text-[11px] font-medium text-[#13805B] bg-[#13805B]/10 border border-[#13805B]/20 px-2.5 py-1 rounded-[4px] whitespace-nowrap">
-                Direct Pay (Demo)
+                Direct Pay
               </span>
             )}
           </div>
@@ -706,9 +640,9 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 <div className="flex items-center justify-between text-[11px] text-white/70">
                   <div className="flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-[#1E8E5A]" />
-                    <span className="font-medium text-white/90">FraudShield Pay (Demo)</span>
+                    <span className="font-medium text-white/90">FraudShield Pay</span>
                   </div>
-                  <span className="font-mono text-white/70">Demo Account</span>
+                  <span className="font-mono text-white/70">Primary Account</span>
                 </div>
                 <div className="mt-2.5 flex items-baseline justify-between">
                   <div>
@@ -722,7 +656,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                     <div className="text-[11px] font-mono text-white/60">•••• {fromAccount.slice(-4)}</div>
                   </div>
                 </div>
-                <div className="mt-2 text-[10px] text-white/50">Demo accounts · Account names and balances are demo data.</div>
               </div>
 
               {/* QR Scanner Expandable Header */}
@@ -777,6 +710,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       value={gatewayMode === 'simulated' ? toAccount : rzpPayeeId}
                       onChange={(e) => {
                         const val = e.target.value;
+                        setQrPayeeName(null);
                         if (gatewayMode === 'simulated') {
                           setToAccount(val);
                         } else {
@@ -799,7 +733,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                         <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
                         <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
                       </svg>
-                      <span>Resolving payee in simulated registry...</span>
+                      <span>Checking registry...</span>
                     </div>
                   )}
 
@@ -821,8 +755,8 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                     </div>
                   )}
 
-                  {!isResolving && !resolveError && resolvedPayee && (
-                    resolvedPayee.found ? (
+                  {!isResolving && !resolveError && (
+                    resolvedPayee?.found ? (
                       <div className="mt-2.5 p-3 bg-[#EEF8F3] border border-[#13805B]/30 rounded-[8px] flex items-center justify-between">
                         <div className="flex items-center gap-2.5 min-w-0">
                           <div className="w-8 h-8 rounded-full bg-[#13805B] text-white flex items-center justify-center font-semibold text-[12px] flex-shrink-0">
@@ -838,7 +772,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                                   ? 'bg-[#B26B00]/10 text-[#B26B00] border-[#B26B00]/30'
                                   : 'bg-[#13805B]/15 text-[#13805B] border-[#13805B]/30'
                               }`}>
-                                {resolvedPayee.verification === 'self_declared' ? 'Self-declared, not bank-verified' : 'Simulated registry'}
+                                {resolvedPayee.verification === 'self_declared' ? 'Self-declared, not bank-verified' : 'Verified'}
                               </span>
                             </div>
                             <div className="text-[11px] font-mono text-[#5E6B7D] truncate">
@@ -862,105 +796,136 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                           </svg>
                         </div>
                       </div>
-                    ) : (
-                      resolvedPayee.kind === 'phone' ? (
-                        <div className="mt-2.5 p-3 bg-[#B26B00]/10 border border-[#B26B00]/20 rounded-[8px]">
-                          <div className="flex items-center gap-2 text-[12px] text-[#B26B00] mb-1.5">
-                            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                            <span>No linked account for this number ({resolvedPayee.masked_phone || resolvedPayee.handle}).</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowLinkForm(true);
-                              if (resolvedPayee.handle && /^[0-9+ ]+$/.test(resolvedPayee.handle)) {
-                                setLinkPhone(resolvedPayee.handle.replace(/[^0-9]/g, '').slice(-10));
-                              }
-                            }}
-                            className="text-[11px] text-[#1F4FD8] font-medium hover:underline"
-                          >
-                            Link this number in simulated registry →
-                          </button>
-                        </div>
-                      ) : resolvedPayee.verification === 'format_only' ? (
-                        <div className="mt-2.5 p-3 bg-[#B26B00]/10 border border-[#B26B00]/20 rounded-[8px]">
-                          <div className="flex items-center gap-2 text-[12px] text-[#B26B00] mb-1.5">
-                            <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                              <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                            </svg>
-                            <span>Format valid — not verified with a bank or simulated registry.</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setShowLinkForm(true);
-                              if (resolvedPayee.handle && resolvedPayee.handle.includes('@')) {
-                                setLinkUpiId(resolvedPayee.handle);
-                              }
-                            }}
-                            className="text-[11px] text-[#1F4FD8] font-medium hover:underline"
-                          >
-                            Link this UPI ID in simulated registry →
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="mt-2.5 p-3 bg-[#C0362C]/10 border border-[#C0362C]/20 rounded-[8px] flex items-center gap-2 text-[12px] text-[#C0362C]">
-                          <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                            <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
-                          </svg>
-                          <div>
-                            <span className="font-semibold">No account found</span>
-                            <span className="text-[11px] text-[#5E6B7D] ml-1.5">Please enter a valid simulated account ID, phone, or UPI handle.</span>
+                    ) : isFormatValidPayee(currentPayee) && currentPayee.includes('@') ? (
+                      /* Not-in-registry UPI ID: neutral note "Name not verified", with optional "Name from QR" tag */
+                      <div className="mt-2.5 p-3 bg-[#F4F5F7] border border-[#DCE0E7] rounded-[8px]">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-[#5B6575] text-white flex items-center justify-center font-semibold text-[12px] flex-shrink-0">
+                              {getInitials(qrPayeeName || currentPayee)}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                {qrPayeeName && (
+                                  <>
+                                    <span className="text-[13px] font-semibold text-[#17202E] truncate">
+                                      {qrPayeeName}
+                                    </span>
+                                    <span className="px-1.5 py-0.5 text-[10px] font-medium bg-[#1F4FD8]/10 text-[#1F4FD8] border border-[#1F4FD8]/20 rounded-[4px] whitespace-nowrap">
+                                      Name from QR
+                                    </span>
+                                  </>
+                                )}
+                                <span className="text-[11px] text-[#5B6575] font-medium">
+                                  Name not verified
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-mono text-[#5E6B7D] truncate">
+                                {currentPayee}
+                              </div>
+                            </div>
                           </div>
                         </div>
-                      )
-                    )
+                      </div>
+                    ) : isFormatValidPayee(currentPayee) ? (
+                      /* Format-valid Phone or ACC_ ID not in registry: neutral note */
+                      <div className="mt-2.5 p-3 bg-[#F4F5F7] border border-[#DCE0E7] rounded-[8px]">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className="w-8 h-8 rounded-full bg-[#5B6575] text-white flex items-center justify-center font-semibold text-[12px] flex-shrink-0">
+                              {getInitials(currentPayee)}
+                            </div>
+                            <div className="min-w-0">
+                              <div className="flex items-center gap-1.5 flex-wrap">
+                                <span className="text-[13px] font-semibold text-[#17202E] truncate">
+                                  {resolvedPayee?.masked_phone || currentPayee}
+                                </span>
+                                <span className="text-[11px] text-[#5B6575] font-medium">
+                                  Name not verified
+                                </span>
+                              </div>
+                              <div className="text-[11px] font-mono text-[#5E6B7D] truncate">
+                                {currentPayee}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    ) : currentPayee.trim().length > 0 ? (
+                      /* Only malformed input shows error styling */
+                      <div className="mt-2.5 p-3 bg-[#C0362C]/10 border border-[#C0362C]/20 rounded-[8px] flex items-center gap-2 text-[12px] text-[#C0362C]">
+                        <svg className="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
+                        </svg>
+                        <div>
+                          <span className="font-semibold">Malformed input</span>
+                          <span className="text-[11px] text-[#5E6B7D] ml-1.5">Please enter a valid UPI ID (e.g. name@upi), mobile number, or account ID.</span>
+                        </div>
+                      </div>
+                    ) : null
                   )}
                 </div>
 
-                {/* Demo Contacts List */}
-                <div>
-                  <div className="text-[12px] font-medium text-[#5B6575] mb-1 flex items-center justify-between">
-                    <span>Demo Receivers</span>
-                    <span className="text-[11px] text-[#5B6575]">Demo accounts</span>
+                {/* Recent payees from this session's payments */}
+                {recentPayments
+                  .map((p) => p.to_account)
+                  .filter((acc): acc is string => Boolean(acc && acc.trim() && acc !== fromAccount))
+                  .filter((acc, idx, arr) => arr.indexOf(acc) === idx)
+                  .length > 0 && (
+                  <div>
+                    <div className="text-[12px] font-medium text-[#5B6575] mb-2 flex items-center justify-between">
+                      <span>Recent payees</span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {recentPayments
+                        .map((p) => p.to_account)
+                        .filter((acc): acc is string => Boolean(acc && acc.trim() && acc !== fromAccount))
+                        .filter((acc, idx, arr) => arr.indexOf(acc) === idx)
+                        .map((payee) => {
+                          const isSelected = (gatewayMode === 'simulated' ? toAccount : rzpPayeeId) === payee;
+                          return (
+                            <button
+                              key={payee}
+                              type="button"
+                              onClick={() => {
+                                if (gatewayMode === 'simulated') {
+                                  setToAccount(payee);
+                                } else {
+                                  setRzpPayeeId(payee);
+                                }
+                                setToDisplayName(payee);
+                                setQrPayeeName(null);
+                                setErrorMessage(null);
+                                resolveTarget(payee);
+                              }}
+                              className={`p-2.5 rounded-[6px] border text-left flex items-center gap-3 transition-all ${
+                                isSelected
+                                  ? 'border-[#1F4FD8] bg-[#EEF3FD] shadow-xs'
+                                  : 'border-[#DCE0E7] bg-[#FFFFFF] hover:border-[#1F4FD8]/40 hover:bg-[#F4F5F7]'
+                              }`}
+                            >
+                              <div className="w-9 h-9 rounded-full text-white bg-[#1F4FD8] flex items-center justify-center font-mono text-[12px] font-semibold flex-shrink-0">
+                                {getInitials(payee)}
+                              </div>
+                              <div className="min-w-0 flex-1">
+                                <div className="text-[13px] font-semibold text-[#1B2433] truncate">
+                                  {payee}
+                                </div>
+                                <div className="text-[11px] font-mono text-[#5B6575] truncate">
+                                  {payee.includes('@') ? 'UPI ID' : payee.startsWith('ACC_') ? 'Account' : 'Payee'}
+                                </div>
+                              </div>
+                            </button>
+                          );
+                        })}
+                    </div>
                   </div>
-                  <div className="text-[11px] text-[#5B6575] mb-2">Account names and balances are demo data.</div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    {PRESET_CONTACTS.map((contact) => {
-                      const isSelected = (gatewayMode === 'simulated' ? toAccount : rzpPayeeId) === contact.accountId;
-                      const contactDisplayName = presetNames[contact.accountId] || contact.accountId;
-                      return (
-                        <button
-                          key={contact.accountId}
-                          type="button"
-                          onClick={() => handleSelectContact(contact)}
-                          className={`p-2.5 rounded-[6px] border text-left flex items-center gap-3 transition-all ${
-                            isSelected
-                              ? 'border-[#1F4FD8] bg-[#EEF3FD] shadow-xs'
-                              : 'border-[#DCE0E7] bg-[#FFFFFF] hover:border-[#1F4FD8]/40 hover:bg-[#F4F5F7]'
-                          }`}
-                        >
-                          <div className={`w-9 h-9 rounded-full text-white ${contact.avatarBg} flex items-center justify-center font-mono text-[12px] font-semibold flex-shrink-0`}>
-                            {getInitials(contactDisplayName)}
-                          </div>
-                          <div className="min-w-0 flex-1">
-                            <div className="text-[13px] font-semibold text-[#1B2433] truncate flex items-center gap-1">
-                              <span>{contactDisplayName}</span>
-                            </div>
-                            <div className="text-[11px] font-mono text-[#5B6575] truncate">{contact.handle}</div>
-                          </div>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
+                )}
 
                 <div className="pt-2">
                   <button
                     type="submit"
-                    disabled={isResolving || !resolvedPayee?.found}
+                    disabled={!isFormatValidPayee(currentPayee) && !resolvedPayee?.found}
                     className="w-full min-h-[44px] py-2.5 px-4 bg-[#1F4FD8] text-[#FFFFFF] text-[14px] font-medium rounded-[6px] hover:bg-[#183EB0] disabled:bg-[#D5DAE1] disabled:text-[#5E6B7D] disabled:cursor-not-allowed transition-colors flex items-center justify-center gap-2"
                   >
                     <span>Proceed to Enter Amount</span>
@@ -970,81 +935,6 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                   </button>
                 </div>
               </form>
-
-              {/* Link Handle / Phone Collapsible Form */}
-              <div className="border border-[#DCE0E7] rounded-[8px] overflow-hidden">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setShowLinkForm(!showLinkForm);
-                    setLinkError(null);
-                    setLinkSuccess(false);
-                  }}
-                  className="w-full flex items-center justify-between px-3.5 py-2.5 text-[12px] font-medium text-[#1F4FD8] bg-[#F4F5F7] hover:bg-[#EEF3FD] transition-colors"
-                >
-                  <span className="flex items-center gap-2">
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1" />
-                    </svg>
-                    Link my UPI ID / phone (demo)
-                  </span>
-                  <svg className={`w-4 h-4 transition-transform duration-200 ${showLinkForm ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
-                  </svg>
-                </button>
-
-                {showLinkForm && (
-                  <div className="p-3.5 bg-[#FFFFFF] border-t border-[#DCE0E7] space-y-3">
-                    <p className="text-[11px] text-[#5B6575]">
-                      Stored in memory only — cleared on restart. Enter a name and your UPI ID or phone to link.
-                    </p>
-
-                    <div className="space-y-2">
-                      <input
-                        type="text"
-                        placeholder="Display name (e.g. Shaurya Sharma)"
-                        value={linkDisplayName}
-                        onChange={(e) => setLinkDisplayName(e.target.value)}
-                        className="w-full px-3 py-2 text-[13px] border border-[#DCE0E7] rounded-[6px] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"
-                      />
-                      <input
-                        type="text"
-                        placeholder="UPI ID (e.g. name@ptyes or name@okhdfcbank)"
-                        value={linkUpiId}
-                        onChange={(e) => setLinkUpiId(e.target.value)}
-                        className="w-full px-3 py-2 text-[13px] font-mono border border-[#DCE0E7] rounded-[6px] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"
-                      />
-                      <input
-                        type="text"
-                        placeholder="10-digit mobile number (e.g. 9820012345)"
-                        value={linkPhone}
-                        onChange={(e) => setLinkPhone(e.target.value)}
-                        className="w-full px-3 py-2 text-[13px] font-mono border border-[#DCE0E7] rounded-[6px] focus:border-[#1F4FD8] focus:ring-1 focus:ring-[#1F4FD8]"
-                      />
-                    </div>
-
-                    {linkError && (
-                      <div className="text-[12px] text-[#C0362C] bg-[#C0362C]/10 border border-[#C0362C]/20 px-2.5 py-1.5 rounded-[4px]">
-                        {linkError}
-                      </div>
-                    )}
-                    {linkSuccess && (
-                      <div className="text-[12px] text-[#13805B] bg-[#13805B]/10 border border-[#13805B]/20 px-2.5 py-1.5 rounded-[4px]">
-                        ✓ Handle linked in simulated registry successfully.
-                      </div>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={handleRegisterLink}
-                      disabled={isLinking}
-                      className="w-full py-2 text-[13px] font-medium bg-[#1F4FD8] text-white rounded-[6px] hover:bg-[#183EB0] disabled:bg-[#D5DAE1] disabled:text-[#5E6B7D] transition-colors"
-                    >
-                      {isLinking ? 'Linking...' : 'Link handle'}
-                    </button>
-                  </div>
-                )}
-              </div>
             </div>
           )}
 
@@ -1160,13 +1050,13 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                   <span className="text-[#5B6575]">Debited from</span>
                   <span className="font-medium text-[#1B2433] flex items-center gap-1.5">
                     <span className="w-2 h-2 rounded-full bg-[#1E8E5A]" />
-                    <span>Demo Account ({fromAccount})</span>
+                    <span>Account ({fromAccount})</span>
                   </span>
                 </div>
                 <div className="p-3 flex justify-between items-center">
                   <span className="text-[#5B6575]">Settlement Rail</span>
                   <span className="font-medium text-[#1B2433]">
-                    {gatewayMode === 'simulated' ? 'Direct Pay (Demo)' : 'Razorpay (Test mode, no real money)'}
+                    {gatewayMode === 'simulated' ? 'Direct Pay' : 'Razorpay (Test mode, no real money)'}
                   </span>
                 </div>
                 <div className="p-3 flex justify-between items-center">
@@ -1294,9 +1184,10 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       </div>
                     </div>
 
-                    {/* Receipt Action */}
-                    {(payResult.status === 'SUCCESS' || payResult.status === 'DECLINED') && payResult.reference_id && (
-                      <div className="mt-4 pt-3 border-t border-[#E3E7EE] flex justify-end">
+                    {/* Receipt Action & Test environment note */}
+                    <div className="mt-4 pt-3 border-t border-[#E3E7EE] flex items-center justify-between text-[11px] text-[#5B6575]">
+                      <span>Test environment, no real money</span>
+                      {(payResult.status === 'SUCCESS' || payResult.status === 'DECLINED') && payResult.reference_id && (
                         <button
                           type="button"
                           disabled={isReceiptLoading}
@@ -1319,8 +1210,8 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                           </svg>
                           <span>{isReceiptLoading ? 'Loading receipt...' : 'View Official Receipt'}</span>
                         </button>
-                      </div>
-                    )}
+                      )}
+                    </div>
                   </div>
 
                   {/* 2FA Verification Box */}
@@ -1334,7 +1225,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                             onClick={() => setOtpInput(payResult.demo_otp!)}
                             className="text-[11px] font-mono font-medium px-2 py-0.5 bg-[#EEF3FD] text-[#1F4FD8] border border-[#1F4FD8]/20 rounded hover:bg-[#DCE7FB]"
                           >
-                            Demo OTP: {payResult.demo_otp} (Tap to fill)
+                            Verification Code: {payResult.demo_otp} (Tap to fill)
                           </button>
                         )}
                       </div>
@@ -1647,6 +1538,11 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
           receipt={selectedReceipt}
           onClose={() => setSelectedReceipt(null)}
         />
+
+        {/* Footer Note */}
+        <div className="text-center text-[11px] text-[#5B6575] py-2">
+          Test environment, no real money
+        </div>
       </div>
     </div>
   );

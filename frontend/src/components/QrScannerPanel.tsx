@@ -497,18 +497,18 @@ export const QrScannerPanel: React.FC<QrScannerPanelProps> = ({
 
       {/* ─── Footer: Quick Test Sample QRs ─── */}
       <div className="px-4 py-2.5 bg-[#0E1522] border-t border-[#232D42] flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-[11px]">
-        <span className="text-white/60 font-medium">Quick Demo QRs:</span>
+        <span className="text-white/60 font-medium">Sample QRs:</span>
         <div className="flex flex-wrap gap-1.5">
           <button
             type="button"
-            onClick={() => handleQuickSample('ACC_0015', 'Demo Account', '500')}
+            onClick={() => handleQuickSample('ACC_0015', 'Recipient', '500')}
             className="px-2 py-0.5 bg-[#1A2333] hover:bg-[#253248] text-white/90 hover:text-white rounded-[4px] font-mono transition-colors border border-white/10"
           >
             ACC_0015 (₹500)
           </button>
           <button
             type="button"
-            onClick={() => handleQuickSample('ACC_0042', 'Demo Account', '1250')}
+            onClick={() => handleQuickSample('ACC_0042', 'Recipient', '1250')}
             className="px-2 py-0.5 bg-[#1A2333] hover:bg-[#253248] text-white/90 hover:text-white rounded-[4px] font-mono transition-colors border border-white/10"
           >
             ACC_0042 (₹1,250)
