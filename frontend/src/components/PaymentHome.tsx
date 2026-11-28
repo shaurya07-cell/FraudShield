@@ -21,7 +21,7 @@ type PayHomeTab = 'recent' | 'contacts';
 
 interface PaymentHomeProps {
   onNavigateToSend: (mode: 'simulated' | 'razorpay', options?: { autoScan?: boolean; selfTransfer?: boolean }) => void;
-  onBackToDashboard: () => void;
+  onBackToDashboard?: () => void;
 }
 
 const SAVED_CONTACTS = [
@@ -472,15 +472,17 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
           </div>
         )}
 
-        <div className="px-4 mt-4">
-          <button
-            type="button"
-            onClick={onBackToDashboard}
-            className="w-full py-2.5 px-3 border border-[#DCE0E7] bg-white rounded-[8px] text-[12px] font-medium text-[#1F4FD8] hover:bg-[#F4F5F7] transition-colors"
-          >
-            ← Back to Operations Console
-          </button>
-        </div>
+        {onBackToDashboard && (
+          <div className="px-4 mt-4">
+            <button
+              type="button"
+              onClick={onBackToDashboard}
+              className="w-full py-2.5 px-3 border border-[#DCE0E7] bg-white rounded-[8px] text-[12px] font-medium text-[#1F4FD8] hover:bg-[#F4F5F7] transition-colors"
+            >
+              ← Back to Operations Console
+            </button>
+          </div>
+        )}
 
         <div className="text-center text-[11px] text-[#5B6575] py-3">
           Test environment, no real money

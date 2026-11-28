@@ -27,6 +27,7 @@ import { DecisionBadge } from './DecisionBadge';
 import { Stepper, StepItem } from './Stepper';
 import { QrScannerPanel, DecodedUpiData } from './QrScannerPanel';
 import { PaymentReceiptModal } from './PaymentReceiptModal';
+import { UpiPinEntry } from './UpiPinEntry';
 
 function loadRazorpayScript(): Promise<boolean> {
   return new Promise((resolve) => {
@@ -67,7 +68,7 @@ interface RazorpayOutcome {
   response_ms?: number;
 }
 
-type UpiStep = 'payee' | 'amount' | 'review' | 'processing' | 'result';
+type UpiStep = 'payee' | 'amount' | 'review' | 'pin' | 'processing' | 'result';
 
 interface SendMoneyViewProps {
   onBackToDashboard?: () => void;
@@ -75,6 +76,8 @@ interface SendMoneyViewProps {
   initialMode?: 'simulated' | 'razorpay';
   autoScan?: boolean;
   selfTransfer?: boolean;
+  showPinStep?: boolean;
+  hideModelScores?: boolean;
 }
 
 export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
@@ -83,6 +86,8 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   initialMode,
   autoScan,
   selfTransfer,
+  showPinStep = true,
+  hideModelScores = false,
 }) => {
   const [gatewayMode, setGatewayMode] = useState<'simulated' | 'razorpay'>(initialMode || 'simulated');
   const [razorpayConfig, setRazorpayConfig] = useState<RazorpayConfig | null>(null);
@@ -558,7 +563,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
   const getStepIndex = () => {
     if (step === 'payee') return 0;
     if (step === 'amount') return 1;
-    if (step === 'review' || step === 'processing') return 2;
+    if (step === 'review' || step === 'pin' || step === 'processing') return 2;
     return 3;
   };
 
@@ -1081,7 +1086,11 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 </button>
                 <button
                   type="button"
-                  onClick={gatewayMode === 'simulated' ? executeSimulatedPayment : executeRazorpayPayment}
+                  onClick={
+                    gatewayMode === 'simulated'
+                      ? (showPinStep ? () => setStep('pin') : executeSimulatedPayment)
+                      : executeRazorpayPayment
+                  }
                   className="flex-1 min-h-[44px] py-2.5 px-4 bg-[#1F4FD8] text-[#FFFFFF] text-[14px] font-medium rounded-[6px] hover:bg-[#183EB0] transition-colors flex items-center justify-center gap-2 shadow-xs"
                 >
                   <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
@@ -1091,6 +1100,19 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                 </button>
               </div>
             </div>
+          )}
+
+          {/* ========================================================================= */}
+          {/* SIMULATED UPI PIN STEP */}
+          {/* ========================================================================= */}
+          {step === 'pin' && (
+            <UpiPinEntry
+              amount={parseFloat(currentAmount || '0')}
+              payeeName={toDisplayName || currentPayee}
+              payeeHandle={currentPayee}
+              onSuccess={executeSimulatedPayment}
+              onCancel={() => setStep('review')}
+            />
           )}
 
           {/* ========================================================================= */}
@@ -1172,9 +1194,11 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                       <div>
                         Processing Latency: <span className="font-semibold text-[#1B2433]">{payResult.total_ms.toFixed(1)} ms</span>
                       </div>
-                      <div>
-                        Risk Assessment: <span className="font-semibold text-[#1B2433]">{payResult.risk_score}</span> / 100
-                      </div>
+                      {!hideModelScores && (
+                        <div>
+                          Risk Assessment: <span className="font-semibold text-[#1B2433]">{payResult.risk_score}</span> / 100
+                        </div>
+                      )}
                       <div>
                         Remaining Balance:{' '}
                         <span className="font-semibold text-[#1B2433]">
@@ -1261,29 +1285,31 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                     </div>
                   )}
 
-                  {/* Evaluated security rules */}
-                  <div>
-                    <h2 className="text-[13px] font-semibold text-[#1B2433] mb-2">Security Evaluation Summary</h2>
-                    {payResult.reasons.length === 0 ? (
-                      <p className="text-[12px] text-[#5B6575]">
-                        All risk rules passed. No anomalous patterns detected.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {payResult.reasons.map((r, i) => (
-                          <div
-                            key={i}
-                            className="p-2.5 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] text-[12px]"
-                          >
-                            <div className="font-medium text-[#1B2433]">{r.detail}</div>
-                            <div className="text-[#5B6575] text-[11px] mt-0.5">
-                              Rule: {r.rule} · Impact weight: {r.weight}
+                  {/* Evaluated security rules (hidden on customer view) */}
+                  {!hideModelScores && (
+                    <div>
+                      <h2 className="text-[13px] font-semibold text-[#1B2433] mb-2">Security Evaluation Summary</h2>
+                      {payResult.reasons.length === 0 ? (
+                        <p className="text-[12px] text-[#5B6575]">
+                          All risk rules passed. No anomalous patterns detected.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {payResult.reasons.map((r, i) => (
+                            <div
+                              key={i}
+                              className="p-2.5 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] text-[12px]"
+                            >
+                              <div className="font-medium text-[#1B2433]">{r.detail}</div>
+                              <div className="text-[#5B6575] text-[11px] mt-0.5">
+                                Rule: {r.rule} · Impact weight: {r.weight}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1307,7 +1333,7 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                           ? 'Payment Declined by Fraud Protection'
                           : 'Payment Session Interrupted'}
                       </div>
-                      <DecisionBadge decision={rzpOutcome.decision} score={rzpOutcome.risk_score} />
+                      <DecisionBadge decision={rzpOutcome.decision} score={hideModelScores ? undefined : rzpOutcome.risk_score} />
                     </div>
                     <div className="text-[11px] text-[#5B6575] mb-2">Test mode, no real money</div>
                     <p className="text-[13px] text-[#1B2433] leading-relaxed">{rzpOutcome.message}</p>
@@ -1334,29 +1360,31 @@ export const SendMoneyView: React.FC<SendMoneyViewProps> = ({
                     </div>
                   </div>
 
-                  {/* Evaluated reasons */}
-                  <div>
-                    <h2 className="text-[13px] font-semibold text-[#1B2433] mb-2">Security Evaluation Summary</h2>
-                    {rzpOutcome.reasons.length === 0 ? (
-                      <p className="text-[12px] text-[#5B6575]">
-                        All risk rules passed. No anomalous patterns detected.
-                      </p>
-                    ) : (
-                      <div className="space-y-2">
-                        {rzpOutcome.reasons.map((r, i) => (
-                          <div
-                            key={i}
-                            className="p-2.5 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] text-[12px]"
-                          >
-                            <div className="font-medium text-[#1B2433]">{r.detail}</div>
-                            <div className="text-[#5B6575] text-[11px] mt-0.5">
-                              Rule: {r.rule} · Impact weight: {r.weight}
+                  {/* Evaluated reasons (hidden on customer view) */}
+                  {!hideModelScores && (
+                    <div>
+                      <h2 className="text-[13px] font-semibold text-[#1B2433] mb-2">Security Evaluation Summary</h2>
+                      {rzpOutcome.reasons.length === 0 ? (
+                        <p className="text-[12px] text-[#5B6575]">
+                          All risk rules passed. No anomalous patterns detected.
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          {rzpOutcome.reasons.map((r, i) => (
+                            <div
+                              key={i}
+                              className="p-2.5 bg-[#FFFFFF] border border-[#DCE0E7] rounded-[6px] text-[12px]"
+                            >
+                              <div className="font-medium text-[#1B2433]">{r.detail}</div>
+                              <div className="text-[#5B6575] text-[11px] mt-0.5">
+                                Rule: {r.rule} · Impact weight: {r.weight}
+                              </div>
                             </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
