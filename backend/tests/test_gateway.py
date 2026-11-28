@@ -209,3 +209,67 @@ def test_reset_restores_balances():
     # Ledger should be empty
     payments = client.get("/gateway/payments").json()
     assert len(payments) == 0
+
+
+def test_account_holder_name_field():
+    """Verify holder_name is present in account responses and matches fictional name."""
+    res = client.get("/gateway/accounts/ACC_0010")
+    assert res.status_code == 200
+    data = res.json()
+    assert "holder_name" in data
+    assert data["holder_name"] is not None
+    assert len(data["holder_name"]) > 0
+    assert data["holder_name"] == data["name"]
+
+
+def test_resolve_found_account():
+    """Verify resolve endpoint successfully resolves valid account IDs."""
+    acc = client.get("/gateway/accounts/ACC_0015").json()
+    res = client.get("/gateway/resolve?handle=ACC_0015")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is True
+    assert data["handle"] == "ACC_0015"
+    assert data["kind"] == "account"
+    assert data["display_name"] == acc["holder_name"]
+
+
+def test_resolve_unknown_account():
+    """Verify resolve endpoint returns found: False, 200 (not 500 or 404) for unknown handles."""
+    res = client.get("/gateway/resolve?handle=ACC_9999")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is False
+    assert data["handle"] == "ACC_9999"
+    assert data["display_name"] is None
+
+
+def test_resolve_razorpay_vpa():
+    """Verify resolve endpoint returns test payee name for success@razorpay."""
+    res = client.get("/gateway/resolve?handle=success@razorpay")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is True
+    assert data["handle"] == "success@razorpay"
+    assert data["kind"] == "vpa"
+    assert data["display_name"] == "Razorpay test payee (test mode)"
+
+
+def test_resolve_vpa_account():
+    """Verify resolve endpoint handles VPA format acc_0010@upi."""
+    acc = client.get("/gateway/accounts/ACC_0010").json()
+    res = client.get("/gateway/resolve?handle=acc_0010@upi")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is True
+    assert data["kind"] == "vpa"
+    assert data["display_name"] == acc["holder_name"]
+
+
+def test_resolve_unknown_vpa():
+    """Verify resolve endpoint handles unknown VPA handles cleanly."""
+    res = client.get("/gateway/resolve?handle=nonexistent.user@upi")
+    assert res.status_code == 200
+    data = res.json()
+    assert data["found"] is False
+    assert data["display_name"] is None

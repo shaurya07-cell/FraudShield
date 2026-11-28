@@ -5,6 +5,7 @@ import {
   fetchRazorpayConfig,
   fetchRazorpayPayments,
   fetchPaymentReceipt,
+  resolvePayee,
   PaymentReceipt,
 } from '../services/api';
 import type {
@@ -24,10 +25,10 @@ interface PaymentHomeProps {
 }
 
 const DEMO_CONTACTS = [
-  { name: 'Demo Account (ACC_0015)', handle: 'ACC_0015', id: 'ACC_0015', tag: 'Demo Receiver' },
-  { name: 'Demo Account (ACC_0042)', handle: 'ACC_0042', id: 'ACC_0042', tag: 'Demo Receiver' },
-  { name: 'Demo Payee (Razorpay)', handle: 'success@razorpay', id: 'success@razorpay', tag: 'Test mode' },
-  { name: 'Demo Account (ACC_0120)', handle: 'ACC_0120', id: 'ACC_0120', tag: 'Demo Receiver' },
+  { handle: 'ACC_0015', id: 'ACC_0015', tag: 'Demo Receiver' },
+  { handle: 'ACC_0042', id: 'ACC_0042', tag: 'Demo Receiver' },
+  { handle: 'success@razorpay', id: 'success@razorpay', tag: 'Test mode' },
+  { handle: 'ACC_0120', id: 'ACC_0120', tag: 'Demo Receiver' },
 ];
 
 export const PaymentHome: React.FC<PaymentHomeProps> = ({
@@ -37,13 +38,14 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
   const [razorpayConfig, setRazorpayConfig] = useState<RazorpayConfig | null>(null);
   const [senderAccount, setSenderAccount] = useState<GatewayAccount | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
+  const [contactNames, setContactNames] = useState<Record<string, string>>({});
   const [recentPayments, setRecentPayments] = useState<GatewayPaymentRecord[]>([]);
   const [rzpPayments, setRzpPayments] = useState<RazorpayPaymentRecord[]>([]);
   const [activeHomeTab, setActiveHomeTab] = useState<PayHomeTab>('recent');
   const [bottomNav, setBottomNav] = useState<BottomNavTab>('home');
   const [selectedReceipt, setSelectedReceipt] = useState<PaymentReceipt | null>(null);
 
-  // Load configs & primary account balance
+  // Load configs & primary account balance & contact names
   useEffect(() => {
     fetchRazorpayConfig()
       .then((cfg) => setRazorpayConfig(cfg))
@@ -58,6 +60,23 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
         setSenderAccount(null);
         setAccountError(err.message || 'Unable to load account.');
       });
+
+    Promise.all(
+      DEMO_CONTACTS.map(async (c) => {
+        try {
+          const res = await resolvePayee(c.id);
+          return { id: c.id, name: res.display_name || c.id };
+        } catch {
+          return { id: c.id, name: c.id };
+        }
+      })
+    ).then((resolved) => {
+      const map: Record<string, string> = {};
+      resolved.forEach((r) => {
+        map[r.id] = r.name;
+      });
+      setContactNames(map);
+    });
   }, []);
 
   // Poll transactions
@@ -444,7 +463,7 @@ export const PaymentHome: React.FC<PaymentHomeProps> = ({
                     {contact.handle.slice(0, 2).toUpperCase()}
                   </div>
                   <div>
-                    <div className="text-[13px] font-semibold text-[#1B2433]">{contact.name}</div>
+                    <div className="text-[13px] font-semibold text-[#1B2433]">{contactNames[contact.id] || contact.id}</div>
                     <div className="text-[11px] font-mono text-[#5B6575]">{contact.handle}</div>
                   </div>
                 </div>
